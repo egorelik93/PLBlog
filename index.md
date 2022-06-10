@@ -1,6 +1,4 @@
-# A high-level systems programming language
-
-## Welcome!
+# Welcome!
 
 I would imagine that many programmers have, at some point in their career, thought about the quirks and limitations of their primary tools, the programming languages in which we express our intent to computers. I know I have! I have wondered so much, in fact, that at some point I started to ask myself what would I consider an 'ideal' programming language to look like. Once upon a time I may have thought a truly ideal language actually existed; I know better now, but at the same time I have honed in on what I would prioritize in a programming language, along with where do I see holes in the landscape of today's programming languages. 
 
