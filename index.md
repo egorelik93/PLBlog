@@ -8,3 +8,5 @@ In this space, I wish to record some of the ideas I have come across or even exp
 I will be summarizing the situation today in Rust and other languages, and in the second section I will go over some of the type theory
 underpinning Rust. This is to set a baseline upon which I will build. If these are familiar to you, feel free to skip
 to the third section where my additions start.
+
+[The Road of Resource Management: The situation from past to today](1.md)
