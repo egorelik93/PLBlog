@@ -10,3 +10,11 @@ underpinning Rust. This is to set a baseline upon which I will build. If these a
 to the third section where my additions start.
 
 [The Road of Resource Management: The situation from past to today](1.md)
+
+[Substructural Type Systems](2.md)
+
+[Before we go on: Some Conventions](3.md)
+
+[Choice](4.md)
+
+[Coroutines and Continuations](5.md)
