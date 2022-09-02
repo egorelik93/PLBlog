@@ -18,3 +18,5 @@ to the third section where my additions start.
 [Choice](4.md)
 
 [Coroutines and Continuations](5.md)
+
+[Generalized Return Types, or Codata](6.md)
