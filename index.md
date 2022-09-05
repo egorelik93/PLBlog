@@ -7,7 +7,8 @@ In particular, my own interests have gravitated over the years in the direction 
 In this space, I wish to record some of the ideas I have come across or even explored myself over the years. In the first section
 I will be summarizing the situation today in Rust and other languages, and in the second section I will go over some of the type theory
 underpinning Rust. This is to set a baseline upon which I will build. If these are familiar to you, feel free to skip
-to the third section where my additions start.
+to the third section where my additions start. The next several pages go through mostly well-known ideas in programming languages.
+Page 7 is where I really start mixing in my own ideas, or at least I have not encountered this interpretation elsewhere.
 
 [The Road of Resource Management: The situation from past to today](1.md)
 
@@ -20,3 +21,5 @@ to the third section where my additions start.
 [Coroutines and Continuations](5.md)
 
 [Generalized Return Types, or Codata](6.md)
+
+[Order of Usage](7.md)
