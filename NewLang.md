@@ -131,6 +131,34 @@ fn f2(a1: &i32, a2: &i32) -> &i32 + 'a1 {
 This is how we say, like in Rust, that only the first lifetime mattered in the result. While the result cannot directly name `'a1` in its type since `a1` is no longer in scope, this pattern allows
 us to say that the lifetime of `a2` can be ignored.
 
+For the same reason as my earlier note, it is not quite clear to me what it would mean to pass `'a1'` here as a lifetime parameter to a struct being returned, such as `Example3`. Maybe it would make sense
+here to use explicit lifetime parameters on the function, since we are already doing so on the type. However, I have not figured out all the interactions of lifetime generics with order preservation.
+For now, assume that all lifetime parameters on a function must be explicitly applied as constraints to the return type.
+
+However, the only reason we need lifetime parameters in `Example3` is because we have pointers of two different lifetimes inside. If we only had one lifetime, it would be much nicer to just write
+
+```
+struct Example4 {
+  ptr: &i32
+}
+```
+
+To make this work, NewLang allows outlives specifiers to be applied to *any* type.
+
+```
+fn f3(a1: &i32, a2: &i32) -> Example4 + 'a1 {
+  Example4 { ptr: a1 }
+}
+```
+
+Even if no outlives specifier is specified on a return type,
+functions cannot return anything of shorter lifetime than its input, 
+so NewLang understands the return at least outlives the intersection of the lifetimes of the function's parameters.
+Thus, in the above example, one never needs to specify `Example4 + 'a1 * 'a2`. 
+This is not to be confused with the lifetimes of the input values themselves. 
+If all the input values themselves are known to outlive some lifetime,
+then NewLang can prove that the result outlives *that* lifetime.
+
 ## Trait Objects and Closures
 
 So far, this system probably doesn't seem any more useful than Rust's, possibly with a more convenient default. As I mentioned, every struct in Rust should behave the same way in NewLang. Where NewLang differs drastically is in *trait objects*.
@@ -233,7 +261,7 @@ fn example6(a: &A) -> Fn(&B) -> &A {
 The final lifetime is the intersection of both arguments. The lifetime of `&A` gets transferred to the closure. When calling a closure or any other trait object,
 since the object is actually one of the inputs, its lifetime also gets transferred to the final result along with any arguments.
 
-As a convenience, when writing a curried `fn` in NewLang, we can often drop `Fn` and just write 
+As a convenience, when writing a curried function in NewLang, we can often drop `Fn` and just write 
 
 ```
 fn example7(a: &A) -> &B -> &A {
@@ -242,3 +270,28 @@ fn example7(a: &A) -> &B -> &A {
 ```
 
 Whether the closure object in this case implements `Fn`, `FnMut`, or just `FnOnce` can be determined from the environment it takes in.
+
+The transfer of lifetimes allows for an "unusual" implementation of `Move` for trait objects. Instead of literally moving a dynamically-sized
+value, we often can silently take a pointer to the original contents and implictly construct a new, small trait object that references it. Ownership is transferred
+without actually moving anything. This allows us to implement a function like the following without dynamically-sized stack objects:
+
+```
+fn extract_trait(m: MyContainer) -> MyTrait {
+  m.m
+}
+```
+
+Being trait objects, this works for closures too.
+
+```
+fn invoke(f: FnOnce(A) -> B, a : A) -> B {
+  f(a)
+}
+```
+
+In practice, a decent optimizer should usually be able to monomorphize this for particular closure-implementing types where appropriate.
+
+As in Rust, sometimes we do need to know that a trait object outlives some lifetime. Rust already allows us to specify this on traits, and as mentioned earlier, NewLang allows
+this to be specified on any type. In some cases it can prove that a particular returned trait object, even if it does not explicitly specify it, must outlive a particular lifetime because of its inputs.
+In such cases, it is legal to then add on the lifetime specifier to an object that did not previously have it.
+
