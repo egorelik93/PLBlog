@@ -1,6 +1,8 @@
-These are design notes for a programming language in a similar space to Rust, but based on some different foundations.
+These are design notes for a programming language in a similar space to Rust, but based on some different foundations. This is a work in progress.
 
 For ease of explanation, I will stick to Rust syntax as much as possible.
+
+## Lifetimes
 
 I want to start by explaining the 'lifetime system', which is very different from Rust's. It is ultimately based on the idea of variables having an "order" amongst themselves.
 This is most clear inside of structs:
@@ -109,3 +111,134 @@ struct Example3<'l, 'm> {
   ptr2: &i32 + 'm
 }
 ```
+
+NewLang now understands that this struct outlives `'l * 'm`. No matter what lifetime constraint is applied to `Example3`, only those that share variabled with `'l` or `'m` will have any effect. Furthermore,
+they will distribute over the fields. Thus, if we have `e: 'n % Example3<'l, 'm>`, we can extract `e.ptr1: ('l * 'm) % (&i32 + 'l)` and `e.ptr2: ('l * 'm) % (&i32 + 'm)`. Their respective outlives specifications
+mean that these become `e.ptr1: 'l % &i32 + 'l` and `e.ptr2: 'm % &i32 + 'm`.
+
+As a note, I'm actually undecided whether `Example3<'l, 'm>` is already constrained to `'l * 'm` or not. You cannot name this type once `'l` and `'m` are gone, and generally I want to say that if the type
+cannot be named, the value's lifetime must have ended. On the other hand, the individual fields could live longer. I'll need to come back to this.
+
+Outlives specifiers can be dropped at any time, however. This means a type can specify that it outlives a lifetime that will shortly cease to exist. This is relevant to function return types. In NewLang,
+function parameters are one of the few places where we allow directly naming the lifetime of a variable, and the function return type is allowed to say that it outlives one or more of those lifetimes. Coming back to an earlier example:
+
+```
+fn f2(a1: &i32, a2: &i32) -> &i32 + 'a1 {
+  a1
+}
+```
+
+This is how we say, like in Rust, that only the first lifetime mattered in the result. While the result cannot directly name `'a1` in its type since `a1` is no longer in scope, this pattern allows
+us to say that the lifetime of `a2` can be ignored.
+
+## Trait Objects and Closures
+
+So far, this system probably doesn't seem any more useful than Rust's, possibly with a more convenient default. As I mentioned, every struct in Rust should behave the same way in NewLang. Where NewLang differs drastically is in *trait objects*.
+
+First, note that NewLang does not use the `dyn` keyword, much like earlier versions of Rust.
+
+Say we have the following trait and impl:
+
+```
+trait MyTrait {
+  fn a(self) -> A { ... }
+  fn b(self) -> B { ... }
+}
+
+struct MyStruct { ... }
+
+impl MyTrait for MyStruct { ... }
+```
+
+In NewLang, it is possible to write this:
+
+```
+fn new() -> MyTrait {
+  MyStruct { ... }
+}
+```
+
+In NewLang, traits are types. These types behave differently from Rusts structs however. If you use the type immediately, there are no issues.
+
+```
+let m = new();
+m.a()
+```
+
+You can pass them to a function.
+
+```
+fn get_a(m: MyTrait) -> A {
+  m.a()
+}
+
+let m = new();
+get_a(m)
+```
+
+You can even include them in a struct.
+
+```
+struct Container {
+  m: MyTrait
+}
+```
+
+In NewLang, trait objects participate in the same preservation of order that all types do. If we instead have a struct like
+
+```
+struct MyRefStruct {
+  ptr_a: &A,
+  ptr_b: &B
+}
+
+impl MyTrait for MyRefStruct {
+  fn a(self) -> A {
+    *self.ptr_a
+  }
+
+  fn b(self) -> B {
+    *self.ptr_b
+  }
+}
+```
+
+`MyRefStruct` obviously will have a lifetime. What happens when creating the trait object is what happens with all function; the lifetime will get transferred to `MyTrait`.
+
+```
+fn from(m : MyRefStruct) -> MyTrait {
+  m
+}
+```
+
+What primarily distinguishes trait objects in NewLang from other types, and types in Rust, is that there is no known lifetime that they outlive. As in Rust, you sometimes need to explicitly 
+specify that the trait object outlives a particular lifetime. Unlike in Rust, we do not and cannot infer one if it is not specified.
+
+This extends to closures, allowing us to write functions like:
+
+```
+fn example5(a: &i32) -> Fn(&i32) -> i32 {
+  |b| *a + *b
+}
+```
+
+We can also write
+
+```
+fn example6(a: &A) -> Fn(&B) -> &A {
+  |b| a
+}
+```
+
+The final lifetime is the intersection of both arguments. The lifetime of `&A` gets transferred to the closure. When calling a closure or any other trait object,
+since the object is actually one of the inputs, its lifetime also gets transferred to the final result along with any arguments.
+
+As a convenience, when writing a curried `fn` in NewLang, we can often drop `Fn` and just write 
+
+```
+fn example7(a: &A) -> &B -> &A {
+  |b| a
+}
+```
+
+Whether the closure object in this case implements `Fn`, `FnMut`, or just `FnOnce` can be determined from the environment it takes in.
