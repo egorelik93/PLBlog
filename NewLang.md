@@ -42,3 +42,70 @@ struct Example2 {
   ptr: &'source * 'source2 i32
 }
 ```
+
+Unlike Rust, NewLang does not have lifetime inference. Instead, functions preserve the lifetime of their inputs. We can still write
+
+```
+fn id(ptr: &i32) -> &i32 {
+  ptr
+}
+```
+
+This function can be invoked on a reference that has any sort of lifetime, and the result will have the same lifetime. In this way, functions *preserve* order.
+
+If a function has multiple arguments, the lifetime of the result is the intersection of all the argument's lifetimes.
+
+```
+fn f(a1: &i32, a2: &i32) -> &i32 {
+  a1
+}
+```
+
+This is very different from Rust, which understands that only `a1`'s lifetime mattered. Later we will come back to ways to get the Rust behavior.
+
+Note that `&i32` is not just `&'l i32` with some sort of inferred lifetime parameter either. Think of the lifetime not as part of the reference type but as an externally
+applied constraint, which functions must preserve. If you need to explicitly apply this constraint, such as in a struct definition, the preferred syntax is `'l % i32` (the use of the `%` symbol specifically is tentative).
+
+```
+struct Example {
+  source: Pinned<i32>,
+  ptr: 'source % &mut i32
+}
+```
+
+This operator can be applied to any type. If we took just what has been described so far, it would seem like we could somehow have a type like `'l % i32`. We can indeed write, and it would seem like writing a function like
+the following would constrain the result in this way:
+
+```
+fn copy(ptr: &i32) -> i32 {
+ *ptr
+}
+```
+
+The reason why `i32` isn't actually order-constrained is that we know that `i32` outlives all lifetimes. In Rust, we write this fact as `i32: 'static`. We'll use the same "outlives" syntax in NewLang,
+and in fact because of order preservation it becomes much more important.
+
+For every non-dyn type in Rust, there is some lifetime that we know it outlives. In Rust, that is just an automatic consequence of how its lifetimes work - a type can only be constrained by a lifetime
+that is passed to it as an input. That is unlike NewLang, where lifetime constraints are applied externally. However, we want all such existing types to behave the same way in NewLang. That means
+a struct in NewLang should automatically derive information about what lifetimes it outlives. For such types, the lifetime application operator has limited effect; the type can only be constrained by those
+variables that are in the lifetime it outlives.
+
+The exception from Rust is borrowed pointer types. For the earlier lifetime application operator to work, `&T` and `&mut T` must not outlive any potential lifetimes. Generally, this means that structs
+that in Rust take lifetime parameters for inner pointers will, if unchanged, have no knowledge of outliving anything in NewLang.
+
+```
+struct BadExample3<'l, 'm> {
+  ptr1: 'l % &i32,
+  ptr2: 'm % &i32
+}
+```
+
+Thus, in NewLang, this needs to be structured a bit differently. Rather than specifying order constraints, the job of a lifetime parameter to a struct is to instead specify "outlives". The job of actually
+specifying the order constraint should then be applied externally. To specify that a pointer "outlives" a lifetime, we use the same syntax as Rust does for dyn-objects.
+
+```
+struct Example3<'l, 'm> {
+  ptr1: &i32 + 'l,
+  ptr2: &i32 + 'm
+}
+```
