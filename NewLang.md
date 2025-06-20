@@ -321,3 +321,34 @@ as long as it we statically know it fits in the space available. When we create 
 We do need to be very careful with how this interacts with unwinding. If an `&mut A/B` is unwound, we must absolutely not be allowed to access the corresponding `Pinned`.
 
 The other borrowed reference types are just synonyms for specific cases of this. `&in A` is `&mut A/()`, and `&out A` is `&mut ()/A`.
+
+We can now define NewLang's version of `Drop`:
+
+```
+trait Drop {
+  fn drop(&in self);
+}
+```
+
+`&in` is NewLang's terminology for what the Rust community calls a "move" pointer. It is semantically the same as the pointed type when the latter is `Sized`, but it allows
+us to work with `!Sized` types.
+
+We haven't talked much about `Pinned`. For the most part, it just preserves the checks that Rust does for borrowed values. However, NewLang does have some tricks.
+
+```
+let x = 5;
+let y: &mut i32/bool = &mut x;
+let z = x.defer;
+*y = true;
+z == true
+```
+
+`.defer` is a special syntax in NewLang. It is a bit like Rust's `.await`, but its effect is scoped to the current line. When `x` is a `Pinned<B>`, within the expression `x.defer` will be an expression of type `B`.
+The result of the expression will then itself become `Pinned`. Past that line, `x` is then out of scope; the lifetime and ownership of the final value are then taken over by `z`.
+
+When used with `Pinned`, we might not allow arbitrary expressions to be used with `.defer`. My goal with `.defer` is not to defer until the borrow ends but actually to conceptually defer to when the borrowed reference
+gets dropped, aka when the obligation gets fulfilled, which may be sooner. These may behave differently in the presence of a divergent function call. `Pinned` does not actually
+allow us to set up this sort of behavior at runtime. The only kind of expression that I am sure will be allowed
+are struct and enum constructors, because we can just set them up ahead of time. 
+`const` functions may be allowed, but I am unsure - it depends on whether it is safe to actually defer non-side-effecting expressions that must be evaluated at runtime
+to when the borrow ends. There is a chance we could also choose to say that the exact time of evaluation is undefined.
