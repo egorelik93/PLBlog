@@ -295,3 +295,29 @@ As in Rust, sometimes we do need to know that a trait object outlives some lifet
 this to be specified on any type. In some cases it can prove that a particular returned trait object, even if it does not explicitly specify it, must outlive a particular lifetime because of its inputs.
 In such cases, it is legal to then add on the lifetime specifier to an object that did not previously have it.
 
+## Linear Types and Borrowed References
+
+Before moving on to the meat of the next section, we need to get some prerequisites out of the way. Unlike Rust, NewLang is genuinely *linear-typed*. The `Drop` trait is used for all types that can be implicitly
+dropped, not just those that explicitly need a custom implementation to drop resources. Most types are still expected to implement `Drop`, but whether this is auto-derived like Rust's `Sync` or implemented by default like
+Rust's `Sized`, I have not quite figured out yet. I won't address the exact implementation of `Drop` quite yet, but I will note that NewLang does not have any of Rust's magic for `Drop`; implementors will have to manually drop
+their internals.
+
+On the other hand, we have to deal with the bane of Linear type systems - exceptions/panics. The way NewLang avoids this issue is to require even true linear types to implement a *separate* Drop-like trait just for cleanup during
+a panic, which we are tentatively calling `Unwind`. This trait is a little more like Rust's `Drop`; every type is assumed to have some sort of `Unwind` implementation, even if that is to abort the program. In practice, a good linear type should be designed to allow for a safe non-aborting `Unwind` instance.
+
+With that out of the way, we can move on to the main subject of this section, which are the various borrowed references available in NewLang. As previously discussed, borrowing a value in NewLang both creates a reference and places the original value under a `Pinned` type. NewLang does have the basic `&` and `&mut` references, but it also has a number of other borrowed reference types. The core such type is an expansion of `&mut` that allows
+*changing* the type under `Pinned`.
+
+```
+let x = 5;
+let y: &mut i32/bool = &mut x;
+*y = true;
+x == true
+```
+
+A reference of type `&mut A/B` is a pointer that currently points to a value of `A`, but which carries an obligation to have a value of type `B` written to it before being dropped. Unlike `&mut A`, `&mut A/B` is a true linear type and cannot be implicitly dropped, unless it is `&mut A/A`. When we do write a value of type `B` to the reference, it changes the type of the reference to `&mut B/B`. We can actually write any `Sized` type to this location
+as long as it we statically know it fits in the space available. When we create an `&mut A/B` by borrowing a value of `A`, that value then becomes of type `Pinned<B>`. We then get access to a value of type `B` once the borrow ends.
+
+We do need to be very careful with how this interacts with unwinding. If an `&mut A/B` is unwound, we must absolutely not be allowed to access the corresponding `Pinned`.
+
+The other borrowed reference types are just synonyms for specific cases of this. `&in A` is `&mut A/()`, and `&out A` is `&mut ()/A`.
