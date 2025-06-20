@@ -1,6 +1,6 @@
 Various notes on Programming Language design. 
 
-[Github Pages](https://egorelik93.github.io/PLBlog/NewLang.html)
+[Github Pages](https://egorelik93.github.io/PLBlog)
 
 [Current](NewLang.md)
 
