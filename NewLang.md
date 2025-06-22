@@ -305,22 +305,26 @@ their internals.
 On the other hand, we have to deal with the bane of Linear type systems - exceptions/panics. The way NewLang avoids this issue is to require even true linear types to implement a *separate* Drop-like trait just for cleanup during
 a panic, which we are tentatively calling `Unwind`. This trait is a little more like Rust's `Drop`; every type is assumed to have some sort of `Unwind` implementation, even if that is to abort the program. In practice, a good linear type should be designed to allow for a safe non-aborting `Unwind` instance.
 
-With that out of the way, we can move on to the main subject of this section, which are the various borrowed references available in NewLang. As previously discussed, borrowing a value in NewLang both creates a reference and places the original value under a `Pinned` type. NewLang does have the basic `&` and `&mut` references, but it also has a number of other borrowed reference types. The core such type is an expansion of `&mut` that allows
+With that out of the way, we can move on to the main subject of this section, which are the various borrowed references available in NewLang. As previously discussed, borrowing a value in NewLang both creates a reference and places the original value under a `Pinned` type. NewLang does have the basic `&` and `&mut` references, but it also has a number of other borrowed reference types. The core such type is (tentatively) called `&tmut`, meaning "typed mut", which allows
 *changing* the type under `Pinned`.
 
 ```
-let x = 5;
-let y: &mut i32/bool = &mut x;
+let tmut x = 5;
+let y: &tmut i32/bool = &tmut x;
 *y = true;
 x == true
 ```
 
-A reference of type `&mut A/B` is a pointer that currently points to a value of `A`, but which carries an obligation to have a value of type `B` written to it before being dropped. Unlike `&mut A`, `&mut A/B` is a true linear type and cannot be implicitly dropped, unless it is `&mut A/A`. When we do write a value of type `B` to the reference, it changes the type of the reference to `&mut B/B`. We can actually write any `Sized` type to this location
-as long as it we statically know it fits in the space available. When we create an `&mut A/B` by borrowing a value of `A`, that value then becomes of type `Pinned<B>`. We then get access to a value of type `B` once the borrow ends.
+A reference of type `&tmut A/B` is a pointer that currently points to a value of `A`, but which carries an obligation to have a value of type `B` written to it before being dropped. Unlike `&mut A`, `&tmut A/B` is a true linear type and cannot be implicitly dropped, unless it is `&tmut A/A`. When we do write a value of type `B` to the reference, it changes the type of the reference to `&tmut B/B`. We can actually write any `Sized` type to this location
+as long as it we statically know it fits in the space available. When we create an `&tmut A/B` by borrowing a value of `A`, that value then becomes of type `Pinned<B>`. We then get access to a value of type `B` once the borrow ends.
 
-We do need to be very careful with how this interacts with unwinding. If an `&mut A/B` is unwound, we must absolutely not be allowed to access the corresponding `Pinned`.
+The other borrowed reference types are just synonyms for specific cases of this. `&in A` is `&tmut A/()`, and `&out A` is `&tmut ()/A`.
 
-The other borrowed reference types are just synonyms for specific cases of this. `&in A` is `&mut A/()`, and `&out A` is `&mut ()/A`.
+We can also abbreviate `&tmut A/A` as `&tmut A`. This type is for the most part the same as `&mut A`, but it carries a key difference. That key difference means that we cannot turn an `&mut A` into an `&tmut A` and temporarily
+write a different type into it. The issue is with how `&tmut` interacts with unwinding or any sort of diverging effect. With `&mut`, because the type never changes there is no question of what type needs to be unwound. We can just drop the `&mut` and then unwinding `Pinned<A>` as `A` is type-safe (whether that is logically safe is something only the user can answer). With `&tmut` though, we need to be very careful; we cannot just drop the reference. Furthermore, because the type
+can change, we have no way of actually knowing what type is present when we try to unwind the associated `Pinned<A>`. Only the reference knows what the current type is, so we have no choice but to give it responsibility for unwinding its current value. However, that creates another problem - if a panic occurs after an `tmut A/A` is dropped but before the borrow ends, possibly because it was dropped in another function, there is no reference available for us to unwind, only the `Pinned` value. Somehow, NewLang has to know whether or not the value inside `Pinned` was already unwound, and act accordingly. This is not something can be determined statically. For this reason, `&tmut A/B` cannot just be a simple pointer; it needs to also carry some information about how to let the runtime know that the pointed value is being unwound.
+
+Strictly speaking, `&tmut A` does not actually require this in order to be safe - in fact, for the longest time there was no separate `&tmut`; I was just using `&mut A/B`, and more recently distinguishing between `&mut A/A` and `&mut A`. However, the change in size and capabilities is too confusing to not have some clearer means of distinguishing them. Any `&tmut A/B` can itself be borrowed as `&mut A`, so this is my current answer. Methods that mutate a borrowed value but are not overly concerned about panics can probably continue to use `&mut`.
 
 We can now define NewLang's version of `Drop`:
 
@@ -336,8 +340,8 @@ us to work with `!Sized` types.
 We haven't talked much about `Pinned`. For the most part, it just preserves the checks that Rust does for borrowed values. However, NewLang does have some tricks.
 
 ```
-let x = 5;
-let y: &mut i32/bool = &mut x;
+let tmut x = 5;
+let y: &tmut i32/bool = &tmut x;
 let z = x.defer;
 *y = true;
 z == true
