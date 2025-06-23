@@ -320,12 +320,6 @@ as long as it we statically know it fits in the space available. When we create 
 
 The other borrowed reference types are just synonyms for specific cases of this. `&in A` is `&tmut A/()`, and `&out A` is `&tmut ()/A`.
 
-We can also abbreviate `&tmut A/A` as `&tmut A`. This type is for the most part the same as `&mut A`, but it carries a key difference. That key difference means that we cannot turn an `&mut A` into an `&tmut A` and temporarily
-write a different type into it. The issue is with how `&tmut` interacts with unwinding or any sort of diverging effect. With `&mut`, because the type never changes there is no question of what type needs to be unwound. We can just drop the `&mut` and then unwinding `Pinned<A>` as `A` is type-safe (whether that is logically safe is something only the user can answer). With `&tmut` though, we need to be very careful; we cannot just drop the reference. Furthermore, because the type
-can change, we have no way of actually knowing what type is present when we try to unwind the associated `Pinned<A>`. Only the reference knows what the current type is, so we have no choice but to give it responsibility for unwinding its current value. However, that creates another problem - if a panic occurs after an `tmut A/A` is dropped but before the borrow ends, possibly because it was dropped in another function, there is no reference available for us to unwind, only the `Pinned` value. Somehow, NewLang has to know whether or not the value inside `Pinned` was already unwound, and act accordingly. This is not something can be determined statically. For this reason, `&tmut A/B` cannot just be a simple pointer; it needs to also carry some information about how to let the runtime know that the pointed value is being unwound.
-
-Strictly speaking, `&tmut A` does not actually require this in order to be safe - in fact, for the longest time there was no separate `&tmut`; I was just using `&mut A/B`, and more recently distinguishing between `&mut A/A` and `&mut A`. However, the change in size and capabilities is too confusing to not have some clearer means of distinguishing them. Any `&tmut A/B` can itself be borrowed as `&mut A`, so this is my current answer. Methods that mutate a borrowed value but are not overly concerned about panics can probably continue to use `&mut`.
-
 We can now define NewLang's version of `Drop`:
 
 ```
@@ -337,7 +331,13 @@ trait Drop {
 `&in` is NewLang's terminology for what the Rust community calls a "move" pointer. It is semantically the same as the pointed type when the latter is `Sized`, but it allows
 us to work with `!Sized` types.
 
-We haven't talked much about `Pinned`. For the most part, it just preserves the checks that Rust does for borrowed values. However, NewLang does have some tricks.
+We can also abbreviate `&tmut A/A` as `&tmut A`. This type is for the most part the same as `&mut A`, but it carries a key difference. That key difference means that we cannot turn an `&mut A` into an `&tmut A` and temporarily
+write a different type into it. The issue is with how `&tmut` interacts with unwinding or any sort of diverging effect. With `&mut`, because the type never changes there is no question of what type needs to be unwound. We can just drop the `&mut` and then unwinding `Pinned<A>` as `A` is type-safe (whether that is logically safe is something only the user can answer). With `&tmut` though, we need to be very careful; we cannot just drop the reference. Furthermore, because the type
+can change, we have no way of actually knowing what type is present when we try to unwind the associated `Pinned<A>`. Only the reference knows what the current type is, so we have no choice but to give it responsibility for unwinding its current value. However, that creates another problem - if a panic occurs after an `tmut A/A` is dropped but before the borrow ends, possibly because it was dropped in another function, there is no reference available for us to unwind, only the `Pinned` value. Somehow, NewLang has to know whether or not the value inside `Pinned` was already unwound, and act accordingly. This is not something can be determined statically. For this reason, `&tmut A/B` cannot just be a simple pointer; it needs to also carry some information about how to let the runtime know that the pointed value is being unwound.
+
+Strictly speaking, `&tmut A` does not actually require this in order to be safe - in fact, for the longest time there was no separate `&tmut`; I was just using `&mut A/B`, and more recently distinguishing between `&mut A/A` and `&mut A`. However, the change in size and capabilities is too confusing to not have some clearer means of distinguishing them. Any `&tmut A/B` can itself be borrowed as `&mut A`, so this is my current answer. Methods that mutate a borrowed value but are not overly concerned about panics can probably continue to use `&mut`.
+
+Because unwinding information needs to be stored somewhere, when borrowing a value as `&tmut`, instead of the original value becoming `Pinned<B>`, the type we use is called `Susp<B>` (WIP Note: Haven't finalized if we're using the `Susp` name for this purpose. Alternative is `TPinned`). Like `Pinned<B>`, `Susp<B>` mostly preserves the checks that Rust does for borrowed values. However, it does have some tricks.
 
 ```
 let tmut x = 5;
@@ -347,12 +347,28 @@ let z = x.defer;
 z == true
 ```
 
-`.defer` is a special syntax in NewLang. It is a bit like Rust's `.await`, but its effect is scoped to the current line. When `x` is a `Pinned<B>`, within the expression `x.defer` will be an expression of type `B`.
-The result of the expression will then itself become `Pinned`. Past that line, `x` is then out of scope; the lifetime and ownership of the final value are then taken over by `z`.
+`.defer` is a special syntax in NewLang. It is a bit like Rust's `.await`, but its effect is scoped to the current line. When `x` is a `Susp<B>`, within the expression `x.defer` will be an expression of type `B`.
+The result of the expression will then itself become `Susp`. Past that line, `x` is then out of scope; the lifetime and ownership of the final value are then taken over by `z`.
 
-When used with `Pinned`, we might not allow arbitrary expressions to be used with `.defer`. My goal with `.defer` is not to defer until the borrow ends but actually to conceptually defer to when the borrowed reference
-gets dropped, aka when the obligation gets fulfilled, which may be sooner. These may behave differently in the presence of a divergent function call. `Pinned` does not actually
-allow us to set up this sort of behavior at runtime. The only kind of expression that I am sure will be allowed
-are struct and enum constructors, because we can just set them up ahead of time. 
-`const` functions may be allowed, but I am unsure - it depends on whether it is safe to actually defer non-side-effecting expressions that must be evaluated at runtime
-to when the borrow ends. There is a chance we could also choose to say that the exact time of evaluation is undefined.
+One might assume that `.defer` is just reordering lines until when the borrow ends. Actually, that is not what it does. As with unwinds, there is a difference between deferring to when the borrow ends versus to when the reference
+gets dropped, and we need to consider how unwinding will account for these deferred lines, which can further change the type beyond what the reference knows about. What seems to be necessary is to execute these deferred lines exactly when the reference gets dropped. This requires runtime support, but mostly the same as what we needed already to ensure that unwinding is safe - this is why I have been intentionally vague about how that check is performed. This unwind check can actually be regarded as a special case of a deferred line that is built-in to every borrow.
+
+(WIP: `TPinned`, or an alternate name, would stick to only the unwind check rather than allowing a callback. Not clear if this is worthwhile to have separately).
+
+There is still some heavy language magic going on in order to enable `.defer` to be used with `Susp`, and that results in a hard restriction - `Susp` can only use `defer` in the block where the borrow begins in the first place. This because in reality, `Susp` is taking in a single closure of all the deferred logic when the borrow occurs. We could manually write this out like this:
+
+```
+let tmut x = 5;
+let (x, y: &tmut i32) = Susp::borrow_tmut(x, |z| z + 1);
+*y *= 2;
+x // == 11
+```
+
+The tuple being returned by the borrow is actually self-referential, so that `y` is order constrained to be before `x`.
+
+Most significantly, this limitation on `Susp` means that `.defer` *cannot* be used with a `Susp` that came from a self-referential struct. If this is desired, it is possible to implement an alternative to `Susp` without any limitations on `.defer`. I am (tentatively) calling this type `Defer`, as it seems to make sense to do so. It is the most powerful variant possible and satisfies desirable mathematical properties that the other types do not. Unfortunately, it does not come for free; `Defer` has to be implemented by allowing for a dynamic list of callbacks. I believe this can be done with a linked list pinned to the stack, but it is still expensive. While mathematically we would want all order constraints to use `Defer`, in practice I believe the much cheaper `Susp` will cover most usages.
+
+It may be possible to provide an extremely limited form of `.defer` to be used with `Pinned`. This seems to make sense when using a struct or enum constructor, and it may even be sound for non-side-effectful functions, like const functions. I am not sure if it is worthwhile to allow this, however.
+
+Whether `Susp` or `Defer`, we can use deferred callbacks to set up some tricks. For example, we can borrow a `Box<A>` as an `&in A` and leave a `Susp<()>`. Internally, this works by setting up the deferred callback
+to deallocate the box.
