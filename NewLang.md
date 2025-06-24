@@ -342,7 +342,7 @@ Because unwinding information needs to be stored somewhere, when borrowing a val
 ```
 let tmut x = 5;
 let y: &tmut i32/bool = &tmut x;
-let z = x.defer;
+let z = x.defer && true;
 *y = true;
 z == true
 ```
@@ -375,6 +375,37 @@ While mathematically we would want all order constraints to use `Defer`, in prac
 
 It may be possible to provide an extremely limited form of `.defer` to be used with `Pinned`. This seems to make sense when using a struct or enum constructor, and it may even be sound for non-side-effectful functions, like const functions. I am not sure if it is worthwhile to allow this, however.
 
+## Advanced .defer tricks
+
 Whether `Susp` or `Defer`, we can use deferred callbacks to set up some tricks. For example, we can borrow a `Box<A>` as an `&in A` and leave a `Susp<()>`. Internally, this works by setting up the deferred callback
 to deallocate the box. Another example is, if we have some sort of channel, we could set up a reference whose callback automatically pushes to that channel. Many "Guard" types that combine a pointer with some sort of release
 mechanism now become optional.
+
+There is also another alternative to `Susp` or `Defer`. Any type on the "deferred" side of an order relationship can be places into an `FnOnce` closure.
+
+```
+let tmut x = 5;
+let y: &tmut i32 = &tmut x;
+let z = || x.defer + 10;
+*y *= 2;
+z()
+```
+
+This works because, just as closures and trait objects have indefinite lifetimes due to being able to contain references, they also cannot escape being on the deferred side of an order constaint due to the possibility of containing a `Susp` or similar type. They then cannot be invoked until free of the order constraint - by which point the deferred value is guaranteed to be available.
+
+More generally, any struct or enum can contain `Susp`-like types, even `Pinned`. To allow this to work, it is possible to pass order-constrained `Susp`-like values to a constructor. We do not use `.defer` syntax when doing this explicitly. However, there are restrictions; especially with `Pinned` and `Susp`, we cannot even fake moving these values, so this can only be done in the block where they initially get borrowed. NewLang will set up the 
+stack allocation so that the `Pinned`/`Susp` value gets pinned in place, and nothing needs to get moved. Ownership of lifetimes will still get transferred.
+
+```
+struct MySuspContainer { susp: Susp<i32> }
+
+fn f() -> i32 {
+  let tmut x = 5;
+  let y = &tmut x;
+  let z = MySuspContainer { susp: x };
+  *y *= 2;
+  z.susp
+}
+```
+
+
