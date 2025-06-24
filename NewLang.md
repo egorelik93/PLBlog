@@ -408,4 +408,20 @@ fn f() -> i32 {
 }
 ```
 
+These "deferred" closures allow us to pull off a cool trick:
 
+```
+fn to_parts<A, B>(f: FnOnce(A) -> B) -> (Fn() -> B, '0 % &out A) {
+  let a : A;
+  let outA = &out a;
+  let g = || f(a.defer);
+  (g, outA)
+}
+
+fn from_parts<A, B>(f : Fn() -> B, outA : 'f % &out A) -> A -> B {
+  |a| {
+    *outA = a;
+    f()
+  }
+}
+```
