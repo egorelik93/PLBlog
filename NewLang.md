@@ -376,13 +376,5 @@ While mathematically we would want all order constraints to use `Defer`, in prac
 It may be possible to provide an extremely limited form of `.defer` to be used with `Pinned`. This seems to make sense when using a struct or enum constructor, and it may even be sound for non-side-effectful functions, like const functions. I am not sure if it is worthwhile to allow this, however.
 
 Whether `Susp` or `Defer`, we can use deferred callbacks to set up some tricks. For example, we can borrow a `Box<A>` as an `&in A` and leave a `Susp<()>`. Internally, this works by setting up the deferred callback
-to deallocate the box.
-
-We also expect to be able to use `Defer` to implement this sort of interface.
-
-```
-fn shift<A, B, C>(callback: FnOnce(DCont<A, B>) -> C) -> (Defer<A>, '0 % DLabel<B, C>);
-fn reset<B, C>(value: Defer<B>, label: 'value % DLabel<B, C>) -> C;
-```
-
-Some might recognize this as a variation of what are called *delimited continuations*.
+to deallocate the box. Another example is, if we have some sort of channel, we could set up a reference whose callback automatically pushes to that channel. Many "Guard" types that combine a pointer with some sort of release
+mechanism now become optional.
