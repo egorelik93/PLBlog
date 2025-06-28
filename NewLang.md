@@ -159,6 +159,8 @@ This is not to be confused with the lifetimes of the input values themselves.
 If all the input values themselves are known to outlive some lifetime,
 then NewLang can prove that the result outlives *that* lifetime.
 
+If `T : 'l`, then it also the case that `('l % T) : 'static`. Whether the reverse is true is not yet clear. 
+
 ## Trait Objects and Closures
 
 So far, this system probably doesn't seem any more useful than Rust's, possibly with a more convenient default. As I mentioned, every struct in Rust should behave the same way in NewLang. Where NewLang differs drastically is in *trait objects*.
@@ -369,11 +371,15 @@ The tuple being returned by the borrow is actually self-referential, so that `y`
 Most significantly, this limitation on `Susp` means that `.defer` *cannot* be used with a `Susp` that came from a self-referential struct. 
 
 Mathematics suggests that ideally, there are some laws we would want a `Susp`-like type to obey. `Susp` itself does not obey these, so I am tentatively calling this idealized type `Defer`. One law essentially amounts to lifting the limitations on `.defer` - more explicitly it means that this type has a `map` operation
-that can be used even when it is being borrowed. It is actually possible to implement this, but it does not come for free; one can use a linked list of callbacks whose nodes are on the stack. Writing and dropping a reference then requires traversing this list, which is a bit expensive for what should just be a "write" operation. The other law is much more problematic - we can express it as the existence of a function `fn((Defer<()>, '0 % A)) -> A`. This says that once a value has been deferred to a `()`, we can actually hide it, even while it is still borrowed. This amounts to being able to ignore a lifetime under certain conditions. Implementing such a function under normal calling conventions is impossible. If we were to try to implement `Defer`, my current idea is to add yet another reference type, called `DMut<A, B>` - just as `Susp` is produced alongside `&tmut A/B`, `Defer` would be produced alongside `DMut<A, B>`. `DMut<A, B>` would be treated specially by NewLang - a function that returns a `DMut<A, B>` or a type containing it would actually be implemented using continuation-passing style rather than the normal stack - this should allow its order constraint to be forgotten if conditions are appropriate. Otherwise, `DMut<A, B>` is essentially the same as `&tmut A/B` and can itself be borrowed as the latter. (WIP: it may make sense to give `DMut<A, B>` more flexible unwinding options that `&tmut A/B`, in order to make it safe to catch.)
+that can be used even when it is being borrowed. It is actually possible to implement this, but it does not come for free; one can use a linked list of callbacks whose nodes are on the stack. Writing and dropping a reference then requires traversing this list, which is a bit expensive for what should just be a "write" operation. The other law is much more problematic - we can express it as the existence of a function `fn((Defer<()>, '0 % A)) -> A`. This says that once a value has been deferred to a `()`, we can actually hide it, even while it is still borrowed. This amounts to being able to ignore a lifetime under certain conditions. Implementing such a function under normal calling conventions is impossible. If we were to try to implement `Defer`, my current idea is to add yet another reference type, called `DMut<A, B>` - just as `Susp` is produced alongside `&tmut A/B`, `Defer` would be produced alongside `DMut<A, B>`. `DMut<A, B>` would be treated specially by NewLang (more precisely, via lack of some yet-to-be-named marker trait) - a function that returns a `DMut<A, B>` or a type containing it would actually be implemented using continuation-passing style rather than the normal stack - this should allow its order constraint to be forgotten if conditions are appropriate. Otherwise, `DMut<A, B>` is essentially the same as `&tmut A/B` and can itself be borrowed as the latter. (WIP: it may make sense to give `DMut<A, B>` more flexible unwinding options that `&tmut A/B`, in order to make it safe to catch.)
 
 While mathematically we would want all order constraints to use `Defer`, in practice I believe the much cheaper `Susp` will cover most uses. The point of having `Defer` as well is to establish what the most general semantics of borrowing are. `Susp` and `Pinned` can be seen as optimized special cases of `Defer`.
 
 It may be possible to provide an extremely limited form of `.defer` to be used with `Pinned`. This seems to make sense when using a struct or enum constructor, and it may even be sound for non-side-effectful functions, like const functions. I am not sure if it is worthwhile to allow this, however.
+
+We do need to mention one universal limitation of borrowing and in particular all `Susp`-like types (`Defer` included). These types return their held value once the borrow ends *except* when the held type is not known to outlive any lifetime. This is because we have no way of statically tracking lifetimes across a `Susp`-like type. Inside a `defer` line it is safe because we know that will be executed as soon as a value is made available, 
+but we cannot cross the `Susp` (or similar) boundary unless we know what lifetime to use. For that reason, it is impossible for `Pinned` to store a trait object or reference without an explicit outlives specifier.
+It is actually possible to borrow such values though; with `Susp`, the passed-in callback must immediately convert it to something with a known lifetime, since there is no opportunity for additional callbacks. `Defer` is thus the only `Susp`-like type that can productively contain such types, but they still cannot be extracted without conversion to a known lifetime.
 
 ## Advanced .defer tricks
 
@@ -424,4 +430,25 @@ fn from_parts<A, B>(f : Fn() -> B, outA : 'f % &out A) -> A -> B {
     f()
   }
 }
+```
+
+We also should be able to implement this function:
+
+```
+fn extract_a(f: FnOnce(FnOnce(A) -> B) -> C) -> Defer<('1 % A, FnOnce(B) -> C)>
+where C : 'static {
+  let (result : Defer<(A, '0 % &out B)>, out_result) = DMut::borrow(());
+  let c = f(|a| { let b; *out_result = (a, &out b); b });
+  (result.defer.0, |b| { *result.defer.1 = b; c })
+}
+```
+
+We need `C` to outlive some lifetime in order to ensure that it doesn't inherit the lifetime of `out_result`, which would prevent implementing the above code. As I don't currently have a syntax
+for "outlives some lifetime", I am leaving it as "outlives `'static`" for now.
+
+This is the key that, slightly modified allows us to implement the following interface:
+
+```
+fn shift(f : FnOnce(FnOnce(A) -> B) -> C) -> Defer<('1 % A, DLabel<B, C>)> where C: 'static;
+fn reset(d: Defer<('1 % B, DLable<B, C>)>) -> C;
 ```
