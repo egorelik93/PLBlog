@@ -381,6 +381,9 @@ We do need to mention one universal limitation of borrowing and in particular al
 but we cannot cross the `Susp` (or similar) boundary unless we know what lifetime to use. For that reason, it is impossible for `Pinned` to store a trait object or reference without an explicit outlives specifier.
 It is actually possible to borrow such values though; with `Susp`, the passed-in callback must immediately convert it to something with a known lifetime, since there is no opportunity for additional callbacks. `Defer` is thus the only `Susp`-like type that can productively contain such types, but they still cannot be extracted without conversion to a known lifetime.
 
+(WIP: This limitation may be dropped on Defer specifically - by making it the default mode when returning such types. This may even be a better fit for my original vision, but it raises questions about what we lose by doing this,
+and what is more useful).
+
 ## Advanced .defer tricks
 
 Whether `Susp` or `Defer`, we can use deferred callbacks to set up some tricks. For example, we can borrow a `Box<A>` as an `&in A` and leave a `Susp<()>`. Internally, this works by setting up the deferred callback
