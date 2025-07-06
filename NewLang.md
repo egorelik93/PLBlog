@@ -453,5 +453,9 @@ This is the key that, slightly modified allows us to implement the following int
 
 ```
 fn shift(f : FnOnce(FnOnce(A) -> B) -> C) -> Defer<('1 % A, DLabel<B, C>)> where C: 'static;
-fn reset(d: Defer<('1 % B, DLable<B, C>)>) -> C;
+fn reset(d: Defer<('1 % B, DLabel<B, C>)>) -> C;
 ```
+
+Some might recognize these names from literature on "Delimited continuations". That is the intention here - a linearly-typed variation of `shift/reset` APIs. Being linearly-typed does greatly restrict these compared
+to the traditional versions, however, as well as being more awkward to use than in a dynamically-typed setting. In a way though, `Defer` is already a kind of delimited continuation; it can be conceptualized as
+`FnOnce(DMut<(), T>) -> ()`.
