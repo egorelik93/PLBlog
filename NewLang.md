@@ -501,4 +501,3 @@ fn main(mut io: IO) {
 ```
 
 This `IO` value or a derived resources need to be passed to any function that wants to do IO. This may be inconvenient, but as long as a single `IO` value is passed around, a program should be deterministic in a sense; while we cannot control the state of the system that comes into the program, the program should execute in a predictable way.
-that comes into
