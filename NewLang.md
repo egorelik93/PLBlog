@@ -300,7 +300,7 @@ In such cases, it is legal to then add on the lifetime specifier to an object th
 ## Linear Types and Borrowed References
 
 Before moving on to the meat of the next section, we need to get some prerequisites out of the way. Unlike Rust, NewLang is genuinely *linear-typed*. The `Drop` trait is used for all types that can be implicitly
-dropped, not just those that explicitly need a custom implementation to drop resources. Most types are still expected to implement `Drop`, but whether this is auto-derived like Rust's `Sync` or implemented by default like
+dropped, not just those that explicitly need a custom implementation to drop resources. Most types are still expected to implement `Drop`, making them *affine*, but whether this is auto-derived like Rust's `Sync` or implemented by default like
 Rust's `Sized`, I have not quite figured out yet. I won't address the exact implementation of `Drop` quite yet, but I will note that NewLang does not have any of Rust's magic for `Drop`; implementors will have to manually drop
 their internals.
 
@@ -459,3 +459,46 @@ fn reset(d: Defer<('1 % B, DLabel<B, C>)>) -> C;
 Some might recognize these names from literature on "Delimited continuations". That is the intention here - a linearly-typed variation of `shift/reset` APIs. Being linearly-typed does greatly restrict these compared
 to the traditional versions, however, as well as being more awkward to use than in a dynamically-typed setting. In a way though, `Defer` is already a kind of delimited continuation; it can be conceptualized as
 `FnOnce(DMut<(), T>) -> ()`.
+
+
+
+## [Skipping a bit]
+
+## Side Effects
+
+From here on out, things will diverge rapidly from Rust. While I have been using Rust syntax here and will continue to do so for now, NewLang was originally conceived as a functional programming language inspired by Haskell.
+One element of that is control over the use of side effects. For our purposes, we only care about *observable* side effects. Modern Haskell uses something called monads to control side effects, but there is a related language called Clean that instead uses something called uniqueness types, which are similar to linear types. Our approach is based on the latter. In NewLang, the consumption and return of linear/affine resources, or the mutation of a mutably borrowed resource, are *not* considered side effects. Our goal is that all observable side effects occur through such linear/affine resources. A function that can perform such a side effect will have to reflect in its type that it borrows the corresponding resources - in this way, these resources are essentially capabilities.
+
+The primary such resource type `IO`. This can only safely be obtained when writing the `main` method for an application.
+
+```
+fn main(mut io: IO) {
+  ...
+}
+```
+
+All IO actions ultimately begin as methods on this io resource.
+
+```
+fn main(mut io: IO) {
+   // Exact API is just for demonstration; no decisions have been made on specific APIs
+   io.println("Hello, World!");
+}
+```
+
+`println` here is a method that mutably borrows a resource of type `IO`.
+
+Some methods may return another resource independent of the `IO` value. This is especially appropriate for anything representing an OS handle of some kind.
+
+```
+fn main(mut io: IO) {
+  let file = io.open("/myfile.txt").unwrap();
+  let text = file.read();
+  io.println("read file");
+  text = text + "and the end";
+  file.write(text);
+}
+```
+
+This `IO` value or a derived resources need to be passed to any function that wants to do IO. This may be inconvenient, but as long as a single `IO` value is passed around, a program should be deterministic in a sense; while we cannot control the state of the system that comes into the program, the program should execute in a predictable way.
+that comes into
