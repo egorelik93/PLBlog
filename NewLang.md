@@ -501,3 +501,15 @@ fn main(mut io: IO) {
 ```
 
 This `IO` value or a derived resources need to be passed to any function that wants to do IO. This may be inconvenient, but as long as a single `IO` value is passed around, a program should be deterministic in a sense; while we cannot control the state of the system that comes into the program, the program should execute in a predictable way.
+
+Of course in the real world, not every program can be written this way. If you have a multiprocess or distributed application, each process or node will need access to IO just to communicate any coordination. To allow for such scenarios, `IO` implements a trait called `Duplicate`.
+
+```
+trait Duplicate {
+  fn duplicate(self: Self) -> (Self, Self);
+}
+```
+
+`Duplicate` at first seems conceptually the same as Rust's `Clone`. However, whereas `Clone` borrows a value immutably and produces copy equal to the borrowed value, `Duplicate` consumes a resource and produces two new resources
+that are supposed to be equal in some sense. The consumption of a resource here is important! We don't make any guarantees that the resulting resources are equal to the one that was consumed. That allows us to say that the very
+act of duplication has observable side effects, which `Clone` does not allow.
