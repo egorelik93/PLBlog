@@ -484,7 +484,7 @@ fn stream_example1() {
 
 A `DSink` can be conceived as a `DOut` generator, with constraints to ensure that only one `DOut` exists at a time.
 
-I have not entirely worked out how extensibility of `defer` works. However, what we want for consuming `DStream` is consistent; we want a continuation that is an `FnMut`.
+I have not entirely worked out how extensibility of `defer` works. However, what we want for consuming `DStream` is consistent; we want a continuation that is an `FnMut(T)`.
 
 ## [Skipping a bit]
 
