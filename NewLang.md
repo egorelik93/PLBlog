@@ -497,6 +497,9 @@ fn consume(list: &mut Vec<T>, stream: DStream<T>) {
 
 Notice that we could not write this body using `defer` syntax; Ownership of `list` would get taken over by the `defer`, and we would be unable to use it to add `t`.
 
+A DStream has some use in representing a list abstract while only using only a smaller buffer, but we can more or less achieve the same effect with a more traditional Stream/Iter interface by replacing `Defer` with `FnOnce`.
+The real value of DStream speceficically is that it behaves like an Event Stream, running a continuation as soon as a value is available. The only caveat is that (to be continued)
+
 ## [Skipping a bit]
 
 ## Side Effects
