@@ -484,7 +484,18 @@ fn stream_example1() {
 
 A `DSink` can be conceived as a `DOut` generator, with constraints to ensure that only one `DOut` exists at a time.
 
-I have not entirely worked out how extensibility of `defer` works. However, what we want for consuming `DStream` is consistent; we want a continuation that is an `FnMut(T)`.
+For now, I will demonstrate how recursion can be used to consume a DStream.
+
+```
+fn consume(list: &mut Vec<T>, stream: DStream<T>) {
+  if let DStreamInner::Cons(t, ts) = stream {
+    list.Add(t);
+    consume(list, ts);
+  }
+}
+```
+
+Notice that we could not write this body using `defer` syntax; Ownership of `list` would get taken over by the `defer`, and we would be unable to use it to add `t`.
 
 ## [Skipping a bit]
 
