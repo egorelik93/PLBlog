@@ -500,7 +500,7 @@ fn main(mut io: IO) {
 }
 ```
 
-This `IO` value or a derived resources need to be passed to any function that wants to do IO. This may be inconvenient, but as long as a single `IO` value is passed around, a program should be deterministic in a sense; while we cannot control the state of the system that comes into the program, the program should execute in a predictable way.
+This `IO` value or a derived resources need to be passed to any function that wants to do IO. This may be inconvenient, but as long as a single `IO` value is passed around, a program should be deterministic in a sense; while we cannot control the state of the system that comes into the program, the program should execute on a given state in a predictable way.
 
 Of course in the real world, not every program can be written this way. If you have a multiprocess or distributed application, each process or node will need access to IO just to communicate any coordination. To allow for such scenarios, `IO` implements a trait called `Duplicate`.
 
@@ -513,3 +513,22 @@ trait Duplicate {
 `Duplicate` at first seems conceptually the same as Rust's `Clone`. However, whereas `Clone` borrows a value immutably and produces copy equal to the borrowed value, `Duplicate` consumes a resource and produces two new resources
 that are supposed to be equal in some sense. The consumption of a resource here is important! We don't make any guarantees that the resulting resources are equal to the one that was consumed. That allows us to say that the very
 act of duplication has observable side effects, which `Clone` does not allow.
+
+This is important for `IO`, because it lets us play an interesting trick. Through the act of duplication, it is now conceptually part of the `IO` resource's "state" that there is another `IO` resource floating around, potentially
+changing the effect of all future operations on our `IO` resource. It just happens that the specific "state" returned by `duplicate`, and thus the specific future effects, are non-deterministic. This is ok though; we can see this non-determinism itself as being part of the state of `IO`. As long as the language perceives that the resource is being mutated, effects that can be abstracted as the result of this mutation are acceptable.
+
+While there is nothing wrong with it from a language perspective, duplicating an `IO` resource does mean that the user must accept non-determinism from their program, or at least take steps to control it. The *only* guarantee that NewLang
+makes about order of effects is that calls on an individual resource instance are guaranteed to occur sequentially. Beyond that,
+there is *no* guarantee that calls on different `IO` resource instances will occur in a given order or not at the same time. In fact, a valid
+NewLang compiler would be free to silently re-order such calls. Atomicity is up to individual APIs.
+
+```
+fn main(io: IO) {
+  let (mut io1, mut io2) = io.duplicate();
+  io1.println("Foo");
+  io2.println("Bar");
+  // This may print "FoBoar" and still be considered valid behavior.
+}
+
+
+
