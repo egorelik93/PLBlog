@@ -460,7 +460,31 @@ Some might recognize these names from literature on "Delimited continuations". T
 to the traditional versions, however, as well as being more awkward to use than in a dynamically-typed setting. In a way though, `Defer` is already a kind of delimited continuation; it can be conceptualized as
 `FnOnce(DMut<(), T>) -> ()`.
 
+## Defer Streams
 
+There is an interesting generalization of Defer to a *stream* of values. This looks something like this:
+
+```
+type DStream<T> = Defer<DeferStreamInner<T>>;
+
+enum DeferStreamInner<T> {
+  Empty,
+  Cons('1 % T, DStream<T>)
+}
+```
+
+A DeferStream or `DStream<T>` lets you obtain one value of `T` at a time, but each value of a non-static `T` must be fully consumed before the next value can be obtained.
+Furthermore, the entire stream is inside a `Defer` and subject to order constraints thereof. This is relevant because just as a `Defer` is usually created as a pair, so too is a `DeferStream`.
+
+```
+fn stream_example1() {
+  let (stream, sink) = DStream::new();
+}
+```
+
+A `DSink` can be conceived as a `DOut` generator, with constraints to ensure that only one `DOut` exists at a time.
+
+I have not entirely worked out how extensibility of `defer` works. However, what we want for consuming `DStream` is consistent; we want a continuation that is an `FnMut`.
 
 ## [Skipping a bit]
 
@@ -529,6 +553,15 @@ fn main(io: IO) {
   io2.println("Bar");
   // This may print "FoBoar" and still be considered valid behavior.
 }
+```
 
+For scenarios where we cannot allow the compiler to reorder calls, the most straightforward means of forcing an order is to collect all the resources into a tuple a borrow from that.
 
-
+```
+fn main(io: IO) {
+  let mut tpl = io.duplicate();
+  tpl.0.println("Foo");
+  tpl.1.println("Bar");
+  // This can only print "FooBar".
+}
+```
