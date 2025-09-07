@@ -465,7 +465,7 @@ to the traditional versions, however, as well as being more awkward to use than 
 
 ## Defer Streams
 
-There is an interesting generalization of Defer to a *stream* of values. This looks something like this:
+There is an interesting generalization of Defer to a *stream* of values. This looks something (but not exactly) like this:
 
 ```
 type DStream<T> = Defer<DeferStreamInner<T>>;
@@ -514,6 +514,9 @@ We do not need to store the result of the `defer` because we are returning a `De
 the lifetime of `sink` then becomes constrained to the `v` borrowed in the `defer`, the latter then remaining borrowed until `sink` is consumed.
 
 A DStream has some use in representing a list abstract while only using only a smaller buffer, but we can more or less achieve the same effect with a more traditional Stream/Iter interface by replacing `Defer` with `FnOnce`.
+A caveat with how we presented this is that if `T` is static, then the `Defer` has no effect, and this is really no different from a list. Depending on what semantics one wants, this idea can be combined others to achieve more
+useful semantics.
+
 The interesting part of DStream specifically is that it looks like an Event Stream, running a continuation as soon as a value is available. This is not enought to "implement" an Event Stream; the "events" here are just function calls with a statically-ordered control flow, not a true dynamic event system. However, an Event Stream could be presented as a `DStream` interface by telling the underlying event handler to "feed" a `DSink`. Still, DStream
 is a blocking interface; for real-world applications, one may want to combine these ideas with some sort of non-blocking mechanism. That is outside the scope of the current topic, however.
 
@@ -526,6 +529,8 @@ multiple times, as long as the time in question is monotonically increasing.
 My hypothesis is that linearity and order constraints would allow for presenting an interface close to classic/continuous FRP but that disallows space leaks.
 
 `DSink<T>` may be logically equivalent to `DSignal<&out T>`.
+
+DStream can be combined with complex types to achieve protocols similar to session types. For example, a server taking requests from a `DStream<&tmut Request/Response>` is given both a Request and a place to send a response, which is is obligated to send before taking the next request. The corresponding client sees this as a type `DSignal<FnOnce(Request) -> Response>`.
 
 ## [Skipping a bit]
 
