@@ -377,6 +377,9 @@ While mathematically we would want all order constraints to use `Defer`, in prac
 
 It may be possible to provide an extremely limited form of `.defer` to be used with `Pinned`. This seems to make sense when using a struct or enum constructor, and it may even be sound for non-side-effectful functions, like const functions. I am not sure if it is worthwhile to allow this, however.
 
+An important note on how `defer` - or more precisely the `map` operation on `Susp`-like types - interacts with order constraints. Any resources that are used by a `defer` expression not only have their ownership taken over by the
+resulting `Susp`-like instance, but also inherits any order constraints those resources had. Additionally, order constraints are considered transitive in NewLang, so even if we eliminate a `Defer<()>` in an order DAG, all constraints imposed transitively on the remaining values remain in place, re-associated with the remaining values. 
+
 We do need to mention one universal limitation of borrowing and in particular all `Susp`-like types (`Defer` included). These types return their held value once the borrow ends *except* when the held type is not known to outlive any lifetime. This is because we have no way of statically tracking lifetimes across a `Susp`-like type. Inside a `defer` line it is safe because we know that will be executed as soon as a value is made available, 
 but we cannot cross the `Susp` (or similar) boundary unless we know what lifetime to use. For that reason, it is impossible for `Pinned` to store a trait object or reference without an explicit outlives specifier.
 It is actually possible to borrow such values though; with `Susp`, the passed-in callback must immediately convert it to something with a known lifetime, since there is no opportunity for additional callbacks. `Defer` is thus the only `Susp`-like type that can productively contain such types, but they still cannot be extracted without conversion to a known lifetime.
@@ -487,20 +490,30 @@ A `DSink` can be conceived as a `DOut` generator, with constraints to ensure tha
 For now, I will demonstrate how recursion can be used to consume a DStream.
 
 ```
-fn consume(list: &mut Vec<T>, stream: DStream<T>) {
-  if let DStreamInner::Cons(t, ts) = stream.defer {
+fn consume(list: &mut Vec<T>, stream: DStreamInner<T>) {
+  if let DStreamInner::Cons(t, ts) = stream {
     list.Add(t);
-    consume(list, ts);
+    consume(list, ts.defer);
   }
+}
+
+fn main(io: IO) {
+  let (stream, sink) = DStream::new::<int>();
+  let v = Vec::new();
+  consume(&mut v, stream.defer);
+  sink.send(1);
+  sink.send(2);
+  io.print(v);
 }
 ```
 
 Since DStream, containing `Defer`, cannot be a type known to outlive some lifetime, we have to use `defer` syntax explicitly to open up the stream despite having no order
 constraint here.
-Notice that we cannot use `defer` syntax to schedule the recursive call here; ownership of `list` would get taken over by the `defer`, and we would be unable to use it to add `t`.
+We do not need to store the result of the `defer` because we are returning a `Defer<()>`, which can be eliminated. Note however that by transitivity,
+the lifetime of `sink` then becomes constrained to the `v` borrowed in the `defer`, the latter then remaining borrowed until `sink` is consumed.
 
 A DStream has some use in representing a list abstract while only using only a smaller buffer, but we can more or less achieve the same effect with a more traditional Stream/Iter interface by replacing `Defer` with `FnOnce`.
-The real value of DStream speceficically is that it behaves like an Event Stream, running a continuation as soon as a value is available. The only caveat is that (to be continued)
+The interesting part of DStream specifically is that it looks like an Event Stream, running a continuation as soon as a value is available. This is not enought to "implement" an Event Stream; the "events" here are just function calls with a statically-ordered control flow, not a true dynamic event system. However, an Event Stream could be presented as a `DStream` interface.
 
 ## [Skipping a bit]
 
