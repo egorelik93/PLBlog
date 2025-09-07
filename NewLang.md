@@ -503,6 +503,7 @@ fn main(io: IO) {
   consume(&mut v, stream.defer);
   sink.send(1);
   sink.send(2);
+  drop(sink);
   io.print(v);
 }
 ```
@@ -513,7 +514,7 @@ We do not need to store the result of the `defer` because we are returning a `De
 the lifetime of `sink` then becomes constrained to the `v` borrowed in the `defer`, the latter then remaining borrowed until `sink` is consumed.
 
 A DStream has some use in representing a list abstract while only using only a smaller buffer, but we can more or less achieve the same effect with a more traditional Stream/Iter interface by replacing `Defer` with `FnOnce`.
-The interesting part of DStream specifically is that it looks like an Event Stream, running a continuation as soon as a value is available. This is not enought to "implement" an Event Stream; the "events" here are just function calls with a statically-ordered control flow, not a true dynamic event system. However, an Event Stream could be presented as a `DStream` interface.
+The interesting part of DStream specifically is that it looks like an Event Stream, running a continuation as soon as a value is available. This is not enought to "implement" an Event Stream; the "events" here are just function calls with a statically-ordered control flow, not a true dynamic event system. However, an Event Stream could be presented as a `DStream` interface by telling the underlying event handler to "feed" a `DSink`.
 
 ## [Skipping a bit]
 
