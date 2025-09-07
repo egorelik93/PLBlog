@@ -523,7 +523,9 @@ There is another interesting type associated with DStream; it can be defined as 
 Note that *function* here really means an `FnMut`; a function that could only be called once would not be a useful Signal. Accepting a `DStream` of requests means that this time-varying function can be called
 multiple times, as long as the time in question is monotonically increasing.
 
-My hypothesis is that linearity and order constraints would allow for presenting an interface close to classic/continuous FRP but that disallows space leaks. 
+My hypothesis is that linearity and order constraints would allow for presenting an interface close to classic/continuous FRP but that disallows space leaks.
+
+`DSink<T>` may be logically equivalent to `DSignal<&out T>`.
 
 ## [Skipping a bit]
 
