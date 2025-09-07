@@ -517,6 +517,14 @@ A DStream has some use in representing a list abstract while only using only a s
 The interesting part of DStream specifically is that it looks like an Event Stream, running a continuation as soon as a value is available. This is not enought to "implement" an Event Stream; the "events" here are just function calls with a statically-ordered control flow, not a true dynamic event system. However, an Event Stream could be presented as a `DStream` interface by telling the underlying event handler to "feed" a `DSink`. Still, DStream
 is a blocking interface; for real-world applications, one may want to combine these ideas with some sort of non-blocking mechanism. That is outside the scope of the current topic, however.
 
+There is another interesting type associated with DStream; it can be defined as roughly `FnOnce(DStream<&out T>)`. We call this type `DSignal<T>`, in correspondance with terminology from some versions of Functional Reactive Programming (classic FRP calls this a "Behavior"). A
+`DSignal<T>` must be able to provide a value of `T` on demand as a continuation of some event, as many times as demanded. Because these events occur at monotonically increasing points in time, a `DSignal<T>` is a potential model for a time-varying function returning `T`; this is the interpretation of a "Signal" in Functional-Reactive Programmming.
+
+Note that *function* here really means an `FnMut`; a function that could only be called once would not be a useful Signal. Accepting a `DStream` of requests means that this time-varying function can be called
+multiple times, as long as the time in question is monotonically increasing.
+
+My hypothesis is that linearity and order constraints would allow for presenting an interface close to classic/continuous FRP but that disallows space leaks. 
+
 ## [Skipping a bit]
 
 ## Side Effects
