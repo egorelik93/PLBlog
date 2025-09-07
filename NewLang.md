@@ -611,3 +611,10 @@ fn main(io: IO) {
   // This can only print "FooBar".
 }
 ```
+
+Beyond simple static scenarios, there are a variety of techniques that people use to coordinate dynamically across larger scenarios. The most common one is the use of "locking" - code that wishes
+to borrow a shared resource must wait until no one else is borrowing it. Another popular pattern is to grant exclusive ownership of a resource to some kind of service, and all interaction with that resource
+must occur through messaging that service. A less well known family of techniques are "optimistic" - code assumes it has access, and if that assumption turns out to be wrong it must rollback any effects before committing them.
+
+All of these dynamic techniques still allow for some non-determinism. Somewhere in their implementation is a place with multiple concurrent writers, often adding onto a queue of some kind. The need for shared mutable resources
+cannot be fully avoided. `Duplicate` is our tool for working with this.
