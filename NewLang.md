@@ -497,14 +497,14 @@ fn consume(list: &mut Vec<T>, stream: DStreamInner<T>) {
   }
 }
 
-fn main(io: IO) {
+fn collect() -> Vec<i32> {
   let (stream, sink) = DStream::new::<int>();
   let v = Vec::new();
   consume(&mut v, stream.defer);
   sink.send(1);
   sink.send(2);
   drop(sink);
-  io.print(v);
+  v
 }
 ```
 
