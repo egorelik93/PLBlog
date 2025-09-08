@@ -621,17 +621,15 @@ cannot be fully avoided. `Duplicate` is our tool for working with this.
 
 Let us look more closely at locking. In Rust, one shares a reference to a mutex, `&Mutex<T>`, and after waiting can obtain access to `&mut T`. In NewLang this is problematic; an observable effect can occur even though we started with an immutably borrowed reference. Rust allows this with interior mutability, but NewLang promises that effects cannot occur through nonlinear values.
 
-[We have two options here. 
+We instead introduce a new non-copy but duplicable borrowed reference type, `&dup`. Effectful APIs can be built on `&dup T` in much the same way as for `IO`. So for example, `&dup Mutex<T>` in NewLang takes the place of `&Mutex<T>` in Rust mutex APIs. `&Mutex<T>` is of little use in NewLang since it cannot be used with effectful APIs.
 
-One style is to say that &-references are always copyable and observably immutable. We instead introduce a new reference type, &dup, which otherwise behaves like an &-reference but is not copyable, only duplicable.
-Effectful APIs can be built on &dup.
-This is the original formulation of NewLang.
+In Rust it is common to put a `Mutex` inside of an `Arc` pointer. In NewLang we need to be careful of this, however; an `Arc` is supposed to have cloneable semantics, but an `Arc<Mutex<T>>` is also effectful, which is problematic.
 
-The other style is to say that &T is only copyable if T implements a marker trait called `Pure`. Any type without interior mutability automatically implements this. Additionally, a user can unsafely implement Pure
-for a type to assert that any effects are not externally visible (this distinguishes it from Rust's new `Freeze` trait, which is strictly the first case). Without it, &T is only duplicable, like &dup T in the other style.
-This feels more Rusty. However, we do lose the ability to immutably borrow a non-pure value.
+[WIP]
+We have gone through several iterations for how to handle this, but the current solution is to have a `Pure` marker trait, which essentially says that `&` and `&dup` are the same for a type. Any type without interior mutability
+automically implements this, much like the recently introduced `Freeze` trait in Rust. Additionally, a user can unsafely mark a type as being `Pure`, promising that any interior mutability is not externally visible. If `T` is
+`Pure`, the `Arc<T>` can safely impement `Clone`. Otherwise, `Arc<T>` is merely `Duplicate`, meaning that `&Arc<T>` cannot be used to produce additional references. In either case, `&Arc<T>` provides access to `&T`, and `&dup Arc<T>` provides access to both `&T` and `&dup T`. This way, `Arc<Mutex<T>>` is treated as a resource.
 
-The one thing I like about the second proposal is that it gives us a viable path for avoiding duplicate versions of Rc and Arc.
-
-Can we do this? Have the `Pure` trait that equates & and &dup. For non-pure `T`, `Rc<T>` and `Arc<T>` give access to `&dup T`, but then are not cloneable, only duplicable.
-]
+Incidentally, some Rust APIs on `Arc` directly, such as those exposing the ref count or `Weak` pointers, are considered effectful as they change according to what independent references do.
+For that reason, NewLang cannot expose the APIs directly on `Arc`. As long as this problem remains limited, our best plan is to also provide an `ImpureArc` type - basically a wrapper with an unsafe constructure
+that always disables `Clone`, allowing for these effectful APIs to be exposed.
