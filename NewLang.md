@@ -618,3 +618,20 @@ must occur through messaging that service. A less well known family of technique
 
 All of these dynamic techniques still allow for some non-determinism. Somewhere in their implementation is a place with multiple concurrent writers, often adding onto a queue of some kind. The need for shared mutable resources
 cannot be fully avoided. `Duplicate` is our tool for working with this.
+
+Let us look more closely at locking. In Rust, one shares a reference to a mutex, `&Mutex<T>`, and after waiting can obtain access to `&mut T`. In NewLang this is problematic; an observable effect can occur even though we started with an immutably borrowed reference. Rust allows this with interior mutability, but NewLang promises that effects cannot occur through nonlinear values.
+
+[We have two options here. 
+
+One style is to say that &-references are always copyable and observably immutable. We instead introduce a new reference type, &dup, which otherwise behaves like an &-reference but is not copyable, only duplicable.
+Effectful APIs can be built on &dup.
+This is the original formulation of NewLang.
+
+The other style is to say that &T is only copyable if T implements a marker trait called `Pure`. Any type without interior mutability automatically implements this. Additionally, a user can unsafely implement Pure
+for a type to assert that any effects are not externally visible (this distinguishes it from Rust's new `Freeze` trait, which is strictly the first case). Without it, &T is only duplicable, like &dup T in the other style.
+This feels more Rusty. However, we do lose the ability to immutably borrow a non-pure value.
+
+The one thing I like about the second proposal is that it gives us a viable path for avoiding duplicate versions of Rc and Arc.
+
+Can we do this? Have the `Pure` trait that equates & and &dup. For non-pure `T`, `Rc<T>` and `Arc<T>` give access to `&dup T`, but then are not cloneable, only duplicable.
+]
