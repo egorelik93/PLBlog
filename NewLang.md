@@ -631,7 +631,7 @@ automically implements this, much like the recently introduced `Freeze` trait in
 `Pure`, the `Arc<T>` can safely impement `Clone`. Otherwise, `Arc<T>` is merely `Duplicate`, meaning that `&Arc<T>` cannot be used to produce additional references. In either case, `&Arc<T>` provides access to `&T`, and `&dup Arc<T>` provides access to both `&T` and `&dup T`. This way, `Arc<Mutex<T>>` is treated as a resource.
 
 Incidentally, some Rust APIs on `Arc` directly, such as those exposing the ref count or `Weak` pointers, are considered effectful as they change according to what independent references do.
-For that reason, NewLang cannot expose the APIs directly on `Arc`. As long as this problem remains limited - it should be only shared smart pointers presenting a pure abstraction but exposing internal state, our best plan is to also provide an `ImpureArc` type - basically a wrapper with an unsafe constructure
+For that reason, NewLang cannot expose the APIs directly on `Arc`. As long as this problem remains limited - it should be only shared smart pointers presenting a pure abstraction but exposing internal state - our best plan is to also provide an `ImpureArc` type, basically a wrapper with an unsafe constructure
 that always disables `Clone`, allowing for these effectful APIs to be exposed.
 
 A mutex could also be placed inside of a static variable. In Rust, that can be used via `&`, but in NewLang we need to use it through `&dup`. A function can use a static variable through `&dup`, but that has implications;
