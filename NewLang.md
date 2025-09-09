@@ -637,6 +637,11 @@ that always disables `Clone`, allowing for these effectful APIs to be exposed.
 A mutex could also be placed inside of a static variable. In Rust, that can be used via `&`, but in NewLang we need to use it through `&dup`. A function can use a static variable through `&dup`, but that has implications;
 the function's environment, even if it is a top-level function, is now considered to be merely duplicable instead of copyable. We need a new trait, `FnDup`, to handle closures of this kind.
 
-In order to allow interior mutation to be used as an implementation detail, it is possible to *unsafely* go between `&` and `&dup`. [
-We may want to create a new *impure* modifier for this purpose
+In order to allow interior mutation to be used as an implementation detail, it is possible to *unsafely* go between `&` and `&dup`. 
+[WIP:
+We may want to create a new *impure* modifier just for this purpose without other unsafe semantics.
 ]
+
+Moving down to single-threaded, we can do the same for `Rc`, `RefCell`, and `Cell`.
+
+In practice, it is more convenient if `Duplicate` is defined instead as cloning through a `&dup`, with `duplicate` being defined in terms of that.
