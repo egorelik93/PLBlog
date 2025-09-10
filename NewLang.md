@@ -523,10 +523,10 @@ the lifetime of `sink` then becomes constrained to the `v` borrowed in the `defe
 
 A DStream has some use in representing a list abstract while only using only a smaller buffer, but we can more or less achieve the same effect with a more traditional Stream/Iter interface by replacing `Defer` with `FnOnce`.
 A caveat with how we presented this is that if `T` is static, then the `Defer` has no effect, and this is really no different from a list. Depending on what semantics one wants, this idea can be combined others to achieve more
-useful semantics.
+useful semantics. A possible one is `Defer<FnOnce() -> T>`. The `FnOnce` gives an opportunity for last-minute computation that isn't associated with any borrowing, as in a traditional Stream.
 
 The interesting part of DStream specifically is that it looks like an Event Stream, running a continuation as soon as a value is available. This is not enought to "implement" an Event Stream; the "events" here are just function calls with a statically-ordered control flow, not a true dynamic event system. However, an Event Stream could be presented as a `DStream` interface by telling the underlying event handler to "feed" a `DSink`. Still, DStream
-is a blocking interface; for real-world applications, one may want to combine these ideas with some sort of non-blocking mechanism. That is outside the scope of the current topic, however.
+is a blocking interface; for real-world applications, one may want to combine these ideas with some sort of non-blocking mechanism. That is outside the scope of the current section, however.
 
 There is another interesting type associated with DStream; it can be defined as roughly `FnOnce(DStream<&out T>)`. We call this type `DSignal<T>`, in correspondance with terminology from some versions of Functional Reactive Programming (classic FRP calls this a "Behavior"). A
 `DSignal<T>` must be able to provide a value of `T` on demand as a continuation of some event, as many times as demanded. Because these events occur at monotonically increasing points in time, a `DSignal<T>` is a potential model for a time-varying function returning `T`; this is the interpretation of a "Signal" in Functional-Reactive Programmming.
