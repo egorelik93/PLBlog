@@ -373,7 +373,7 @@ Most significantly, this limitation on `Susp` means that `.defer` *cannot* be us
 Mathematics suggests that ideally, there are some laws we would want a `Susp`-like type to obey. `Susp` itself does not obey these, so I am tentatively calling this idealized type `Defer`. One law essentially amounts to lifting the above limitations on `.defer` - more explicitly it means that this type has a `map` operation
 that can be used even when it is being borrowed. It is actually possible to implement this, but it does not come for free; one can use a linked list of callbacks whose nodes are on the stack. Writing and dropping a reference then requires traversing this list, which is a bit expensive for what should just be a "write" operation. Logically we would expect `Defer<T>` to behave like `FnOnce(FnOnce(T) -> ()) -> ()`. The other law is much more problematic - we can express it as the existence of a function `fn((Defer<()>, '0 % A)) -> A`. This says that once a value has been deferred to a `()`, we can actually hide it, even while it is still borrowed. This amounts to being able to ignore a lifetime under certain conditions. Implementing such a function under normal calling conventions is impossible. If we were to try to implement `Defer`, my current idea is to add yet another reference type, called `DMut<A, B>` - just as `Susp` is produced alongside `&tmut A/B`, `Defer` would be produced alongside `DMut<A, B>`. `Defer<B>` and `DMut<A, B>` would both be treated specially by NewLang (more precisely, via lack of some yet-to-be-named marker trait) - a function that returns `DMut<A, B>`, `Defer<B>`, or a type containing either one would actually be implemented using continuation-passing style rather than the normal stack - this should allow its order constraint to be forgotten if conditions are appropriate. Otherwise, `DMut<A, B>` is essentially the same as `&tmut A/B` and can itself be borrowed as the latter. (WIP: it may make sense to give `DMut<A, B>` more flexible unwinding options that `&tmut A/B`, in order to make it safe to catch.)
 
-While mathematically we would want all order constraints to use `Defer`, in practice I believe the much cheaper `Susp` will cover most uses. The point of having `Defer` as well is to establish what the most general semantics of borrowing are. `Susp` and `Pinned` can be seen as optimized special cases of `Defer`.
+While mathematically we would want all order constraints to use `Defer`, in practice I believe the much cheaper `Susp` will cover most typical uses. `Defer` is probably necessary for some interesting control flow. `Defer` does establish what the most general semantics of borrowing are. `Susp` and `Pinned` can be seen as optimized special cases of `Defer`.
 
 It may be possible to provide an extremely limited form of `.defer` to be used with `Pinned`. This seems to make sense when using a struct or enum constructor, and it may even be sound for non-side-effectful functions, like const functions. I am not sure if it is worthwhile to allow this, however.
 
@@ -393,17 +393,25 @@ Whether `Susp` or `Defer`, we can use deferred callbacks to set up some tricks. 
 to deallocate the box. Another example is, if we have some sort of channel, we could set up a reference whose callback automatically pushes to that channel. Many "Guard" types that combine a pointer with some sort of release
 mechanism now become optional.
 
-There is also another alternative to `Susp` or `Defer`. Any type on the "deferred" side of an order relationship can be places into an `FnOnce` closure.
+There is also another alternative to `Susp` or `Defer`. Any type on the "deferred" side of an order relationship can be placed into an `FnOnce` closure. Inside the closure the borrow is treated as ended, 
+so provided that the inner value can be extracted when the borrow ends
+(i.e. it outlives a known lifetime),
+`FnOnce` can actually replace `Susp` or `Defer`.
 
 ```
 let tmut x = 5;
 let y: &tmut i32 = &tmut x;
-let z = || x.defer + 10;
+let z = || x + 10;
 *y *= 2;
 z()
 ```
 
 This works because, just as closures and trait objects have indefinite lifetimes due to being able to contain references, they also cannot escape being on the deferred side of an order constaint due to the possibility of containing a `Susp` or similar type. They then cannot be invoked until free of the order constraint - by which point the deferred value is guaranteed to be available.
+
+Note that unlike with `Susp` or `Defer`, the closure and extensions will not be invoked as soon as the borrow ends. This is why it is necessary that the value inside the underlying `Susp` or `Defer` can be extracted
+and stored.
+
+[WIP: I am undecided what using defer syntax with an external variable inside a closure would mean]
 
 More generally, any struct or enum can contain `Susp`-like types, even `Pinned`. To allow this to work, it is possible to pass order-constrained `Susp`-like values to a constructor. We do not use `.defer` syntax when doing this explicitly. However, there are restrictions; especially with `Pinned` and `Susp`, we cannot even fake moving these values, so this can only be done in the block where they initially get borrowed. NewLang will set up the 
 stack allocation so that the `Pinned`/`Susp` value gets pinned in place, and nothing needs to get moved. Ownership of lifetimes will still get transferred.
