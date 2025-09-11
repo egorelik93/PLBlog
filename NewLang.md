@@ -534,6 +534,9 @@ There is another interesting type associated with DStream; it can be defined as 
 Note that *function* here really means an `FnMut`; a function that could only be called once would not be a useful Signal. Accepting a `DStream` of requests means that this time-varying function can be called
 multiple times, as long as the time in question is monotonically increasing.
 
+Signals are interesting, in part because they present an immutable interface over something that is very much mutable. My hypothesis, which I have not verified, is that through duplexing,
+it is possible to safely implement `Clone` for Signals. 
+
 My hypothesis is that linearity and order constraints would allow for presenting an interface close to classic/continuous FRP but that disallows space leaks.
 
 `DSink<T>` may be logically equivalent to `DSignal<&out T>`.
