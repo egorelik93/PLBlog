@@ -324,6 +324,16 @@ function returns use lazy trait objects by default, and arguments and structs us
 to trait objects, we are using *dyn* for the conversion to a type with positive polarity, i.e. the closure. We may add other means of creating these, but having this align with the trait object
 system does give this concept some familiarity]
 
+If you want to create a function that does some computation when partially applied, the lazy closure type is probbaly not what you want, as that will get delayed as well. Instead, you will need to return the dyn type,
+as that will force the closure object to actually get created immediately.
+
+```
+fn partial(a: i32) -> dyn FnOnce(i32) -> i32 {
+  a += 5;
+  |b| a + b
+}
+```
+
 As in Rust, sometimes we do need to know that a trait object outlives some lifetime. Rust already allows us to specify this on traits, and as mentioned earlier, NewLang allows
 this to be specified on any type. In some cases it can prove that a particular returned trait object, even if it does not explicitly specify it, must outlive a particular lifetime because of its inputs
 and the lazy evaluation.
