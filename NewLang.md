@@ -510,7 +510,7 @@ These "deferred" closures allow us to pull off a cool trick:
 fn to_parts<A, B>(f: FnOnce(A) -> B) -> (Fn() -> B, '0 % &out A) {
   let a : A;
   let outA = &out a;
-  let g = || f(a.defer);
+  let g = || f(a);
   (g, outA)
 }
 
