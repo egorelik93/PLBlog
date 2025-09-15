@@ -165,7 +165,7 @@ If `T : 'l`, then it also the case that `('l % T) : 'static`. Whether the revers
 
 So far, this system probably doesn't seem any more useful than Rust's, possibly with a more convenient default. As I mentioned, every struct in Rust should behave the same way in NewLang. Where NewLang differs drastically is in *trait objects*.
 
-First, note that NewLang does not use the `dyn` keyword, much like earlier versions of Rust.
+First, note that in NewLang, one ordinarily does not want to use the `dyn` keyword with trait objects.
 
 Say we have the following trait and impl:
 
@@ -273,13 +273,14 @@ fn example7(a: &A) -> &B -> &A {
 
 Whether the closure object in this case implements `Fn`, `FnMut`, or just `FnOnce` can be determined from the environment it takes in.
 
-The transfer of lifetimes allows for an "unusual" implementation of `Move` for trait objects. Instead of literally moving a dynamically-sized
+Here is what is actually happening. The transfer of lifetimes allows for an "unusual" implementation of `Move` for trait objects. Instead of literally moving a dynamically-sized
 value, we often can silently take a pointer to the original contents and implictly construct a new, small trait object that references it. Ownership is transferred
-without actually moving anything. This allows us to implement a function like the following without dynamically-sized stack objects:
+without actually moving anything. This allows us to pass a trait object as an argument to a function like the following without dynamically-sized stack objects:
 
 ```
-fn extract_trait(m: MyContainer) -> MyTrait {
-  m.m
+fn invoke_trait() -> A {
+  let m = new();
+  get_a(m)
 }
 ```
 
@@ -293,9 +294,40 @@ fn invoke(f: FnOnce(A) -> B, a : A) -> B {
 
 In practice, a decent optimizer should usually be able to monomorphize this for particular closure-implementing types where appropriate.
 
+On the other hand, when returning a trait object from a function, something else interesting happens. Rather than execute the function to return the trait object, the whole
+invovation expression is *lazily evaluated*. A conformant trait object is constructed that stores the necessary *environment* being passed in to the invocation, and the invocation
+is only actually executed when a trait method gets called on the object. This is basically a closure in disguise. Though, keep in mind this is an implementation detail;
+if an optimizer determines it can avoid the closure by reordering execution, it can do so.
+
+```
+fn invoke_a() {
+  let m = new();
+  // new does not actually get called until here, as part of the evaluation of a().
+  m.a()
+}
+```
+
+It is possible to *force* that a function immediately returns a trait object by using the *dyn* modifier in a return type. This modifier basically eliminates the laziness of trait objects.
+Do note that this limits the possible ways to implement such a function. For now, the only way to return a dyn trait object from a function is if it came from one of the arguments (in which case,
+we use the mentioned move implementation).
+
+```
+fn extract_trait(m: MyContainer) -> dyn MyTrait {
+  m.m
+}
+```
+
+In other contexts, *dyn* is unnecessary because it is actually the default for a trait object. Which implementation gets used by default depends on the context. In short,
+function returns use lazy trait objects by default, and arguments and structs use dyn trait objects by default.
+
+[Theory note: We are using lazy object to mean *a type with negative polarity*. For now we only have trait objects as examples of these. As long as we are limited
+to trait objects, we are using *dyn* for the conversion to a type with positive polarity, i.e. the closure. We may add other means of creating these, but having this align with the trait object
+system does give this concept some familiarity]
+
 As in Rust, sometimes we do need to know that a trait object outlives some lifetime. Rust already allows us to specify this on traits, and as mentioned earlier, NewLang allows
-this to be specified on any type. In some cases it can prove that a particular returned trait object, even if it does not explicitly specify it, must outlive a particular lifetime because of its inputs.
-In such cases, it is legal to then add on the lifetime specifier to an object that did not previously have it.
+this to be specified on any type. In some cases it can prove that a particular returned trait object, even if it does not explicitly specify it, must outlive a particular lifetime because of its inputs
+and the lazy evaluation.
+In such cases, it is legal to then add on the lifetime specifier to an object that did not previously have it. For dyn trait objects, this is more difficult to prove for reasons we will get to in the next section.
 
 ## Linear Types and Borrowed References
 
@@ -340,7 +372,7 @@ can change, we have no way of actually knowing what type is present when we try 
 Strictly speaking, `&tmut A` does not actually require this in order to be safe - in fact, for the longest time there was no separate `&tmut`; I was just using `&mut A/B`, and more recently distinguishing between `&mut A/A` and `&mut A`. However, the change in size and capabilities is too confusing to not have some clearer means of distinguishing them. Any `&tmut A/B` can itself be borrowed as `&mut A`, so this is my current answer. Methods that mutate a borrowed value but are not overly concerned about panics can probably continue to use `&mut`.
 
 Because unwinding information needs to be stored somewhere, when borrowing a value as `&tmut`, instead of the original value becoming `Pinned<B>`, the type we use is called `Susp<B>` (WIP Note: Haven't finalized if we're using the `Susp` name for this purpose. Alternative is `TPinned`). Like `Pinned<B>`, `Susp<B>` mostly preserves the checks that Rust does for borrowed values. However, it does have some tricks.
-
+     
 ```
 let tmut x = 5;
 let y: &tmut i32/bool = &tmut x;
@@ -380,22 +412,66 @@ It may be possible to provide an extremely limited form of `.defer` to be used w
 An important note on how `defer` - or more precisely the `map` operation on `Susp`-like types - interacts with order constraints. Any resources that are used by a `defer` expression not only have their ownership taken over by the
 resulting `Susp`-like instance, but also inherits any order constraints those resources had. Additionally, order constraints are considered transitive in NewLang, so even if we eliminate a `Defer<()>` in an order DAG, all constraints imposed transitively on the remaining values remain in place, re-associated with the remaining values. 
 
-We do need to mention one universal limitation of borrowing and in particular all `Susp`-like types (`Defer` included). These types return their held value once the borrow ends *except* when the held type is not known to outlive any lifetime. This is because we have no way of statically tracking lifetimes across a `Susp`-like type. Inside a `defer` line it is safe because we know that will be executed as soon as a value is made available, 
-but we cannot cross the `Susp` (or similar) boundary unless we know what lifetime to use. For that reason, it is impossible for `Pinned` to store a trait object or reference without an explicit outlives specifier.
-It is actually possible to borrow such values though; with `Susp`, the passed-in callback must immediately convert it to something with a known lifetime, since there is no opportunity for additional callbacks. `Defer` is thus the only `Susp`-like type that can productively contain such types, but they still cannot be extracted without conversion to a known lifetime.
+We now need to reconsider something fundamental. There is some expectation that a function `FnOnce(A) -> B` should be equivalent to at least one of the variations of `FnOnce(A, &out B) -> ()`. However, we just explained
+how `&out B` has this deferred callback mechanism. To be most coherent, we want to say that `FnOnce(A) -> B` also has access to such a mechanism. Not for all `B` however! Lazily evaluated `B`, which for now means all trait objects, do not have the benefit of this mechanism, as the lazy evaluation mechanism works differently. For example, in `FnOnce(A) -> B -> C`, we cannot use a callback for `FnOnce(B) -> C`, but we *can* use one for `C`, provided it is not a lazy type. 
 
-(WIP: This limitation may be dropped on Defer specifically - by making it the default mode when returning such types. This may even be a better fit for my original vision, but it raises questions about what we lose by doing this,
-and what is more useful).
+[Theory note: With this, we are basically saying that `FnOnce(&out T) -> ()` is the implicit conversion of a type with positive polarity into one with negative polarity.]
+
+In fact, `&out B` where `B` is a trait object is actually implicitly a dyn trait object, as in function arguments.
+Thus, we *do* get this mechanism for `FnOnce(A) -> dyn B`. This actually explains *how* we can return a dyn trait object from a function; we're not really returning it, but passing it to a provided callback. This
+also gives us another means of creating a dyn trait object to return; we can borrow local variables inside the function. This is the reason why we cannot prove implicit *outlives* relationships on returned dyn trait objects.
+Of course, we can always explicitly write them, and that puts restrictions on what we can borrow locally.
+
+```
+fn new2() -> dyn MyTrait {
+  MyStruct { ... }
+}
+```
+
+A minimal compiler implementation would be expected to optimize unused callbacks out, probably by monomorphizing on the callback.
+
+This is all necessary in order to bypass a universal operational limitation of borrowing and in particular all `Susp`-like types (`Defer` included).
+If the inner held type is not known to outlive any lifetime, then we have no way of statically tracking this type's lifetime across the `Susp` side boundary of a `Susp`/`&out` pair. This is an issue because we then cannot safely store the value until it is extracted; we have no choice but to completely use up this value in the callback at the time `&out` is consumed. We would be unable to implement a function `fn extract(d: Defer<T>) -> T` for all `T`.
+This is where functions having an optional callback comes in; for all `T` that are not lazy types, then `extract` can be implemented by passing `T` to the callback. This happens implicitly; there is no need or ability to explicitly work with this callback. The language assembles the callback from the control flow of `T`, as it should be impossible for `T` to escape this callback
+without outliving some lifetime.
+
+```
+fn extract_ref(d: Defer<&mut T>) -> &mut T {
+  d
+}
+```
+
+For lazy `T`, we cannot implement the type `fn extract(d: Defer<T>) -> T`, since such `T` do not use the callback mechanism. What we can do, however, is extract `dyn T`, which does use the mechanism. Again, there
+is nothing we need to explicitly do for this to work, other than marking the types correctly.
+
+```
+fn extract_trait(d: Defer<MyTrait>) -> dyn MyTrait {
+  d
+}
+```
+
+To allow us to write a single generic `extract` function type, the return type of a function type can be marked with a `return` modifier. This forces the return type into a form that supports the callback mechanism;
+for lazy `T`, this turns it into `dyn T`. Otherwise, it has no effect.
+
+```
+fn extract<T>(d: Defer<T>) -> return T {
+  d
+}
+```
+
+[Theory note: `return T` is actually explicitly forcing the conversion from a type of positive polarity to one of negative polarity. 
+As part of that however, it also first implicitly converts `T` to a type of positive polarity if necessary.]
+
+If using `Susp` instead of `Defer`, the usual caveats apply; the callback must be statically known. For `Pinned`, there is no callback so it is simply impossible to to store a trait object or reference without an explicit outlives specifier.
 
 ## Advanced .defer tricks
 
-Whether `Susp` or `Defer`, we can use deferred callbacks to set up some tricks. For example, we can borrow a `Box<A>` as an `&in A` and leave a `Susp<()>`. Internally, this works by setting up the deferred callback
+Whether `Susp` or `Defer`, we can use deferred callbacks to set up some tricks - more with the latter than the former. For example, we can borrow a `Box<A>` as an `&in A` and leave a `Susp<()>`. Internally, this works by setting up the deferred callback
 to deallocate the box. Another example is, if we have some sort of channel, we could set up a reference whose callback automatically pushes to that channel. Many "Guard" types that combine a pointer with some sort of release
 mechanism now become optional.
 
 There is also another alternative to `Susp` or `Defer`. Any type on the "deferred" side of an order relationship can be placed into an `FnOnce` closure. Inside the closure the borrow is treated as ended, 
-so provided that the inner value can be extracted when the borrow ends
-(i.e. it outlives a known lifetime),
+so provided that the inner value can be extracted when the borrow ends,
 `FnOnce` can actually replace `Susp` or `Defer`.
 
 ```
@@ -449,27 +525,28 @@ fn from_parts<A, B>(f : Fn() -> B, outA : 'f % &out A) -> A -> B {
 We also should be able to implement this function:
 
 ```
-fn extract_a(f: FnOnce(FnOnce(A) -> B) -> C) -> Defer<('1 % A, FnOnce(B) -> C)>
+fn extract_a(f: FnOnce(FnOnce(A) -> B) -> C) -> ('1 % A, FnOnce(B) -> C)
 where C : 'static {
   let (result : Defer<(A, '0 % &out B)>, out_result) = DMut::borrow(());
   let c = f(|a| { let b; *out_result = (a, &out b); b });
-  (result.defer.0, |b| { *result.defer.1 = b; c })
+  (result.0, |b| { *result.1 = b; c })
 }
 ```
 
 We need `C` to outlive some lifetime in order to ensure that it doesn't inherit the lifetime of `out_result`, which would prevent implementing the above code. As I don't currently have a syntax
 for "outlives some lifetime", I am leaving it as "outlives `'static`" for now.
 
+This function relies entirely on the deferred callback mechanism in order to be able to "return" a closure we constructed. The callback only ends once `FnOnce(B) -> C` is consumed.
+
 This is the key that, slightly modified allows us to implement the following interface:
 
 ```
-fn shift(f : FnOnce(FnOnce(A) -> B) -> C) -> Defer<('1 % A, DLabel<B, C>)> where C: 'static;
-fn reset(d: Defer<('1 % B, DLabel<B, C>)>) -> C;
+fn shift(f : FnOnce(FnOnce(A) -> B) -> C) -> ('1 % A, DLabel<B, C>) where C: 'static;
+fn reset(d: ('1 % B, DLabel<B, C>>) -> C;
 ```
 
 Some might recognize these names from literature on "Delimited continuations". That is the intention here - a linearly-typed variation of `shift/reset` APIs. Being linearly-typed does greatly restrict these compared
-to the traditional versions, however, as well as being more awkward to use than in a dynamically-typed setting. In a way though, `Defer` is already a kind of delimited continuation; it can be conceptualized as
-`FnOnce(DMut<(), T>) -> ()`.
+to the traditional versions, however, as well as being more awkward to use than in a dynamically-typed setting. In a way though, `Defer` and the implicit "return" callback are already a kind of delimited continuations; it can be conceptualized as `FnOnce(DMut<(), T>) -> ()`.
 
 ## Defer Streams
 
