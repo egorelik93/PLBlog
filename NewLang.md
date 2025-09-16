@@ -743,3 +743,6 @@ We may want to create a new *impure* modifier just for this purpose without othe
 Moving down to single-threaded, we can do the same for `Rc`, `RefCell`, and `Cell`.
 
 In practice, it is more convenient if `Duplicate` is defined instead as cloning through a `&dup`, with `duplicate` being defined in terms of that.
+
+[ Tangential Note on Monads: We would like to support monads. However, since we are in a linear language, it makes sense to ask what a comprehensive linear monad would look like. As it turns out, it doesn't buy us much.
+  For any linear functor `F` in fact, mapping over `FnOnce`, given `F<A>` we can trivially extract `A`, obtaining `('1 % F<()>, Defer<A>)`. Weaker kinds of monads may be more diverse, but we won't address them at the moment.]  
