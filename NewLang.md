@@ -66,16 +66,16 @@ fn f(a1: &i32, a2: &i32) -> &i32 {
 This is very different from Rust, which understands that only `a1`'s lifetime mattered. Later we will come back to ways to get the Rust behavior.
 
 Note that `&i32` is not just `&'l i32` with some sort of inferred lifetime parameter either. Think of the lifetime not as part of the reference type but as an externally
-applied constraint, which functions must preserve. If you need to explicitly apply this constraint, such as in a struct definition, the preferred syntax is `'l % i32` (the use of the `%` symbol specifically is tentative).
+applied constraint, which functions must preserve. If you need to explicitly apply this constraint, such as in a struct definition, the preferred syntax is `'l ! i32` (the use of the `%` symbol specifically is tentative).
 
 ```
 struct Example {
   source: Pinned<i32>,
-  ptr: 'source % &mut i32
+  ptr: 'source ! &mut i32
 }
 ```
 
-This operator can be applied to any type. If we took just what has been described so far, it would seem like we could somehow have a type like `'l % i32`. We can indeed write, and it would seem like writing a function like
+This operator can be applied to any type. If we took just what has been described so far, it would seem like we could somehow have a type like `'l ! i32`. We can indeed write, and it would seem like writing a function like
 the following would constrain the result in this way:
 
 ```
@@ -97,8 +97,8 @@ that in Rust take lifetime parameters for inner pointers will, if unchanged, hav
 
 ```
 struct BadExample3<'l, 'm> {
-  ptr1: 'l % &i32,
-  ptr2: 'm % &i32
+  ptr1: 'l ! &i32,
+  ptr2: 'm ! &i32
 }
 ```
 
@@ -113,8 +113,8 @@ struct Example3<'l, 'm> {
 ```
 
 NewLang now understands that this struct outlives `'l * 'm`. No matter what lifetime constraint is applied to `Example3`, only those that share variabled with `'l` or `'m` will have any effect. Furthermore,
-they will distribute over the fields. Thus, if we have `e: 'n % Example3<'l, 'm>`, we can extract `e.ptr1: ('l * 'm) % (&i32 + 'l)` and `e.ptr2: ('l * 'm) % (&i32 + 'm)`. Their respective outlives specifications
-mean that these become `e.ptr1: 'l % &i32 + 'l` and `e.ptr2: 'm % &i32 + 'm`.
+they will distribute over the fields. Thus, if we have `e: 'n ! Example3<'l, 'm>`, we can extract `e.ptr1: ('l * 'm) ! (&i32 + 'l)` and `e.ptr2: ('l * 'm) ! (&i32 + 'm)`. Their respective outlives specifications
+mean that these become `e.ptr1: 'l ! &i32 + 'l` and `e.ptr2: 'm ! &i32 + 'm`.
 
 As a note, I'm actually undecided whether `Example3<'l, 'm>` is already constrained to `'l * 'm` or not. You cannot name this type once `'l` and `'m` are gone, and generally I want to say that if the type
 cannot be named, the value's lifetime must have ended. On the other hand, the individual fields could live longer. I'll need to come back to this.
@@ -159,7 +159,7 @@ This is not to be confused with the lifetimes of the input values themselves.
 If all the input values themselves are known to outlive some lifetime,
 then NewLang can prove that the result outlives *that* lifetime.
 
-If `T : 'l`, then it also the case that `('l % T) : 'static`. Whether the reverse is true is not yet clear. 
+If `T : 'l`, then it also the case that `('l ! T) : 'static`. Whether the reverse is true is not yet clear. 
 
 ## Trait Objects and Closures
 
@@ -413,7 +413,7 @@ The tuple being returned by the borrow is actually self-referential, so that `y`
 Most significantly, this limitation on `Susp` means that `.defer` *cannot* be used with a `Susp` that came from a self-referential struct. 
 
 Mathematics suggests that ideally, there are some laws we would want a `Susp`-like type to obey. `Susp` itself does not obey these, so I am tentatively calling this idealized type `Defer`. One law essentially amounts to lifting the above limitations on `.defer` - more explicitly it means that this type has a `map` operation
-that can be used even when it is being borrowed. It is actually possible to implement this, but it does not come for free; one can use a linked list of callbacks whose nodes are on the stack. Writing and dropping a reference then requires traversing this list, which is a bit expensive for what should just be a "write" operation. Logically we would expect `Defer<T>` to behave like `FnOnce(FnOnce(T) -> ()) -> ()`. The other law is much more problematic - we can express it as the existence of a function `fn((Defer<()>, '0 % A)) -> A`. This says that once a value has been deferred to a `()`, we can actually hide it, even while it is still borrowed. This amounts to being able to ignore a lifetime under certain conditions. Implementing such a function under normal calling conventions is impossible. If we were to try to implement `Defer`, my current idea is to add yet another reference type, called `DMut<A, B>` - just as `Susp` is produced alongside `&tmut A/B`, `Defer` would be produced alongside `DMut<A, B>`. `Defer<B>` and `DMut<A, B>` would both be treated specially by NewLang (more precisely, via lack of some yet-to-be-named marker trait) - a function that returns `DMut<A, B>`, `Defer<B>`, or a type containing either one would actually be implemented using continuation-passing style rather than the normal stack - this should allow its order constraint to be forgotten if conditions are appropriate. Otherwise, `DMut<A, B>` is essentially the same as `&tmut A/B` and can itself be borrowed as the latter. (WIP: it may make sense to give `DMut<A, B>` more flexible unwinding options that `&tmut A/B`, in order to make it safe to catch.)
+that can be used even when it is being borrowed. It is actually possible to implement this, but it does not come for free; one can use a linked list of callbacks whose nodes are on the stack. Writing and dropping a reference then requires traversing this list, which is a bit expensive for what should just be a "write" operation. Logically we would expect `Defer<T>` to behave like `FnOnce(FnOnce(T) -> ()) -> ()`. The other law is much more problematic - we can express it as the existence of a function `fn((Defer<()>, '0 ! A)) -> A`. This says that once a value has been deferred to a `()`, we can actually hide it, even while it is still borrowed. This amounts to being able to ignore a lifetime under certain conditions. Implementing such a function under normal calling conventions is impossible. If we were to try to implement `Defer`, my current idea is to add yet another reference type, called `DMut<A, B>` - just as `Susp` is produced alongside `&tmut A/B`, `Defer` would be produced alongside `DMut<A, B>`. `Defer<B>` and `DMut<A, B>` would both be treated specially by NewLang (more precisely, via lack of some yet-to-be-named marker trait) - a function that returns `DMut<A, B>`, `Defer<B>`, or a type containing either one would actually be implemented using continuation-passing style rather than the normal stack - this should allow its order constraint to be forgotten if conditions are appropriate. Otherwise, `DMut<A, B>` is essentially the same as `&tmut A/B` and can itself be borrowed as the latter. (WIP: it may make sense to give `DMut<A, B>` more flexible unwinding options that `&tmut A/B`, in order to make it safe to catch.)
 
 While mathematically we would want all order constraints to use `Defer`, in practice I believe the much cheaper `Susp` will cover most typical uses. `Defer` is probably necessary for some interesting control flow. `Defer` does establish what the most general semantics of borrowing are. `Susp` and `Pinned` can be seen as optimized special cases of `Defer`.
 
@@ -442,14 +442,26 @@ A minimal compiler implementation would be expected to optimize unused callbacks
 
 This is all necessary in order to bypass a universal operational limitation of borrowing and in particular all `Susp`-like types (`Defer` included).
 If the inner held type is not known to outlive any lifetime, then we have no way of statically tracking this type's lifetime across the `Susp` side boundary of a `Susp`/`&out` pair. This is an issue because we then cannot safely store the value until it is extracted; we have no choice but to completely use up this value in the callback at the time `&out` is consumed. We would be unable to implement a function `fn extract(d: Defer<T>) -> T` for all `T`.
-This is where functions having an optional callback comes in; for all `T` that are not lazy types, then `extract` can be implemented by passing `T` to the callback. This happens implicitly; there is no need or ability to explicitly work with this callback. The language assembles the callback from the control flow of `T`, as it should be impossible for `T` to escape this callback
-without outliving some lifetime.
+This is where functions having an optional callback comes in; for all `T` that are not lazy types, then `extract` can be implemented by passing `T` to the callback. This happens implicitly; the language assembles the callback from the control flow of `T`, as it should be impossible for `T` to escape this callback
+without outliving some lifetime. The callback ends as soon as the contents are transformed into a value that can be stored.
 
 ```
 fn extract_ref(d: Defer<&mut T>) -> &mut T {
   d
 }
 ```
+
+However, the callback can also be explicitly set up by using an appropriate function invocation with `.defer` syntax. This creates a `Defer` expression.
+
+```
+fn example_defer() -> i32 {
+  let a = add(1, 2Z).defer;
+  let b = a.defer + 4;
+  b
+}
+```
+
+For now this capability serves no purpose.
 
 For lazy `T`, we cannot implement the type `fn extract(d: Defer<T>) -> T`, since such `T` do not use the callback mechanism. What we can do, however, is extract `dyn T`, which does use the mechanism. Again, there
 is nothing we need to explicitly do for this to work, other than marking the types correctly.
@@ -517,14 +529,14 @@ fn f() -> i32 {
 These "deferred" closures allow us to pull off a cool trick:
 
 ```
-fn to_parts<A, B>(f: FnOnce(A) -> B) -> (Fn() -> B, '0 % &out A) {
+fn to_parts<A, B>(f: FnOnce(A) -> B) -> (Fn() -> B, '0 ! &out A) {
   let a : A;
   let outA = &out a;
   let g = || f(a);
   (g, outA)
 }
 
-fn from_parts<A, B>(f : Fn() -> B, outA : 'f % &out A) -> A -> B {
+fn from_parts<A, B>(f : Fn() -> B, outA : 'f ! &out A) -> A -> B {
   |a| {
     *outA = a;
     f()
@@ -535,9 +547,9 @@ fn from_parts<A, B>(f : Fn() -> B, outA : 'f % &out A) -> A -> B {
 We also should be able to implement this function:
 
 ```
-fn extract_a(f: FnOnce(FnOnce(A) -> B) -> C) -> ('1 % A, FnOnce(B) -> C)
+fn extract_a(f: FnOnce(FnOnce(A) -> B) -> C) -> ('1 ! A, FnOnce(B) -> C)
 where C : 'static {
-  let (result : Defer<(A, '0 % &out B)>, out_result) = DMut::borrow(());
+  let (result : Defer<(A, '0 ! &out B)>, out_result) = DMut::borrow(());
   let c = f(|a| { let b; *out_result = (a, &out b); b });
   (result.0, |b| { *result.1 = b; c })
 }
@@ -551,8 +563,8 @@ This function relies entirely on the deferred callback mechanism in order to be 
 This is the key that, slightly modified allows us to implement the following interface:
 
 ```
-fn shift(f : FnOnce(FnOnce(A) -> B) -> C) -> ('1 % A, DLabel<B, C>) where C: 'static;
-fn reset(d: ('1 % B, DLabel<B, C>>) -> C;
+fn shift(f : FnOnce(FnOnce(A) -> B) -> C) -> ('1 ! A, DLabel<B, C>) where C: 'static;
+fn reset(d: ('1 ! B, DLabel<B, C>>) -> C;
 ```
 
 Some might recognize these names from literature on "Delimited continuations". That is the intention here - a linearly-typed variation of `shift/reset` APIs. Being linearly-typed does greatly restrict these compared
@@ -567,7 +579,7 @@ type DStream<T> = Defer<DeferStreamInner<T>>;
 
 enum DeferStreamInner<T> {
   Empty,
-  Cons('1 % T, DStream<T>)
+  Cons('1 ! T, DStream<T>)
 }
 ```
 
@@ -745,4 +757,4 @@ Moving down to single-threaded, we can do the same for `Rc`, `RefCell`, and `Cel
 In practice, it is more convenient if `Duplicate` is defined instead as cloning through a `&dup`, with `duplicate` being defined in terms of that.
 
 [ Tangential Note on Monads: We would like to support monads. However, since we are in a linear language, it makes sense to ask what a comprehensive linear monad would look like. As it turns out, it doesn't buy us much.
-  For any linear functor `F` in fact, mapping over `FnOnce`, given `F<A>` we can trivially extract `A`, obtaining `('1 % F<()>, Defer<A>)`. Weaker kinds of monads may be more diverse, but we won't address them at the moment.]  
+  For any linear functor `F` in fact, mapping over `FnOnce`, given `F<A>` we can trivially extract `A`, obtaining `('1 ! F<()>, Defer<A>)`. Weaker kinds of monads may be more diverse, but we won't address them at the moment.]  
