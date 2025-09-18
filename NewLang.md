@@ -808,14 +808,20 @@ In other words, it applies the lifetime not to the return value itself but to th
 syntax, or it can attempt to be inferred.
 
 That being said, if you remember the Lifetimes section, you might have realized that `'static !` is actually completely useless in NewLang - what we really need is *outlives*. We have been using `+ 'l` syntax for Rust
-for this, but now we have need for something else. `impl 'l ! T` is the same as `T + 'l`, but we also have `impl 'l ? T`, which applies `impl 'l` to the delimited continuation.
+for this, but now we have need for something else. For any trait `T`, `X + /T` means that `T` is applied to the delimited continuation of `X`.
 
 ```
-fn await_request3(io: &mut IO) -> impl 'static ? Request {
+fn await_request3(io: &mut IO) -> Request + /'static + /Move {
   let cont = return.get_out();
   ????(io, cont);
   return;
 }
 ```
 
-This is better - now we require that the continuation is static.
+This is better - now we require that the continuation is static and can be moved. This is a bit unwieldy to write out though. We have the option to define a trait encompassing both, but there is another
+option - the `!` and `?` are actually intended to be extensible. We won't go into the details, but different values can be applied using `!` or `?` to apply different type transformations.
+We call these custom behaviors *modalities*.
+One of the consistencies however is the relationship of `?` and `!`.
+
+[Theory: There is a particularly important trait called `Value` that motivates the `!` and `?` syntax. A type that implements `Value` is exactly one that is all of `Copy`, `Drop`, and `'static`.
+Thus, `T + Value` corresponds to what in Linear Logic is written `!T`, sometimes called *of course*, an *exponential modality*. On the other hand, we have consciously chosen to assign a different meaning to `?` from linear logic - it corresponds to what [one paper](https://dl.acm.org/doi/pdf/10.1145/3473567) calls a *coexponential modality*, specifically the one that paper names *que*. The more classic meaning of `?`, along with the other coexponential modality, will show up later. The `/trait` syntax was created purely to conform better with Rust, and is not part of my original syntax]
