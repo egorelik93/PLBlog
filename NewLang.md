@@ -568,7 +568,7 @@ fn reset(d: ('1 ! B, DLabel<B, C>>) -> C;
 ```
 
 Some might recognize these names from literature on "Delimited continuations". That is the intention here - a linearly-typed variation of `shift/reset` APIs. Being linearly-typed does greatly restrict these compared
-to the traditional versions, however, as well as being more awkward to use than in a dynamically-typed setting. In a way though, `Defer` and the implicit "return" callback are already a kind of delimited continuations; it can be conceptualized as `FnOnce(DMut<(), T>) -> ()`.
+to the traditional versions, however, as well as being more awkward to use than in a dynamically-typed setting. In a way though, `Defer` and the implicit "return" callback are already a kind of delimited continuations; it can be conceptualized as `FnOnce(DMut<(), T>) -> ()`. From here on out, we will refer to these callbacks as the resource's delimited continuation.
 
 ## Defer Streams
 
@@ -757,4 +757,65 @@ Moving down to single-threaded, we can do the same for `Rc`, `RefCell`, and `Cel
 In practice, it is more convenient if `Duplicate` is defined instead as cloning through a `&dup`, with `duplicate` being defined in terms of that.
 
 [ Tangential Note on Monads: We would like to support monads. However, since we are in a linear language, it makes sense to ask what a comprehensive linear monad would look like. As it turns out, it doesn't buy us much.
-  For any linear functor `F` in fact, mapping over `FnOnce`, given `F<A>` we can trivially extract `A`, obtaining `('1 ! F<()>, Defer<A>)`. Weaker kinds of monads may be more diverse, but we won't address them at the moment.]  
+  For any linear functor `F` in fact, mapping over `FnOnce`, given `F<A>` we can trivially extract `A`, obtaining `('1 ! F<()>, Defer<A>)`. Weaker kinds of monads may be more diverse, but we won't address them at the moment.] 
+
+## Async and Modality
+
+Every language eventually runs into the question of how to cleanly support asynchronous IO operations. The current state of the art seems to be to transform functions into state machines,
+which are driven either by polling or through continuations. Much has been written about how this splits ecosystems into two - blocking and non-blocking variants. Ideally, there would be no need for that.
+
+As has been seen, continuations are already ubiquitout in NewLang. Can we take advantage of that to build a silently asynchronous system? Using `defer`, perhaps we could write something like this:
+
+```
+fn server_loop(io: IO) {
+  let request = await_request(io).defer;
+  respond(request.defer);
+}
+
+fn await_request(io: &mut IO) -> Request {
+  let cont = return.get_out();
+  ????(io, cont);
+  return;
+ // Profit?
+}
+```
+
+Well, as it turns out, this doesn't *quite* work. First, some new syntax [WIP]. We discussed in the defer section how function returns have an out pointer with a delimited continuation, but not how to actually
+obtain it, since we couldn't do anything with it then. This is a [tentative] syntax; `return.get_out()` retrieves an `&out Request` pointer, mutating the return type `return` expects to just `()`.
+
+There is a catch though; you cannot just store this continuation anywhere. It still has an order restriction to be used before the `return`. That means there is no way to truly make `await_request` a non-blocking
+function with this type; we cannot return until `cont` is run.
+
+Not all hope is lost with this approach; as long as we stay in the stack frame, we can pin the continuation, add it to some sort of waitlist, take some work and run it in the meantime until our continuation is completed, and then
+we can leave the stack frame.
+This is all possible. However, it does leave a lot of stack frames lying around, which is not great if you want thousands of such concurrent tasks. We will not focus on this approach.
+
+Instead, let's focus on why we were stuck - we have a continuation that cannot be stored for an indefinite length of time. The problem is, we have no way to know what is in this continuation. 
+Its environment may be order-constrained. The contents may include something that cannot be moved. If only we could somehow tell the function to *only* allow continuation with these rectrictions.
+
+Well, as it turns out, we can.
+
+```
+fn await_request2(io: &mut IO) -> 'static ? Request {
+  let cont = return.get_out();
+  ????(io, cont);
+  return;
+}
+```
+
+The syntax `'static ? Request' may seem evocative of `'static ! Request`. It should! They are closely related; returning `'static ? Request` is meant to be equivalent to returning `FnOnce('static ! &out Request) -> ()`.
+In other words, it applies the lifetime not to the return value itself but to the deferred continuation consuming it. As with other function invocations, the deferred continuation can be explicitly specified using `.defer`
+syntax, or it can attempt to be inferred.
+
+That being said, if you remember the Lifetimes section, you might have realized that `'static !` is actually completely useless in NewLang - what we really need is *outlives*. We have been using `+ 'l` syntax for Rust
+for this, but now we have need for something else. `impl 'l ! T` is the same as `T + 'l`, but we also have `impl 'l ? T`, which applies `impl 'l` to the delimited continuation.
+
+```
+fn await_request3(io: &mut IO) -> impl 'static ? Request {
+  let cont = return.get_out();
+  ????(io, cont);
+  return;
+}
+```
+
+This is better - now we require that the continuation is static.
