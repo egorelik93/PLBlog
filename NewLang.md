@@ -764,7 +764,7 @@ In practice, it is more convenient if `Duplicate` is defined instead as cloning 
 Every language eventually runs into the question of how to cleanly support asynchronous IO operations. The current state of the art seems to be to transform functions into state machines,
 which are driven either by polling or through continuations. Much has been written about how this splits ecosystems into two - blocking and non-blocking variants. Ideally, there would be no need for that.
 
-As has been seen, continuations are already ubiquitout in NewLang. Can we take advantage of that to build a silently asynchronous system? Using `defer`, perhaps we could write something like this:
+As has been seen, continuations are already ubiquitous in NewLang. Can we take advantage of that to build a silently asynchronous system? Using `defer`, perhaps we could write something like this:
 
 ```
 fn server_loop(io: IO) {
@@ -803,7 +803,7 @@ fn await_request2(io: &mut IO) -> 'static ? Request {
 }
 ```
 
-The syntax `'static ? Request' may seem evocative of `'static ! Request`. It should! They are closely related; returning `'static ? Request` is meant to be equivalent to returning `FnOnce('static ! &out Request) -> ()`.
+The syntax `'static ? Request` may seem evocative of `'static ! Request`. It should! They are closely related; returning `'static ? Request` is meant to be equivalent to returning `FnOnce('static ! &out Request) -> ()`.
 In other words, it applies the lifetime not to the return value itself but to the deferred continuation consuming it. As with other function invocations, the deferred continuation can be explicitly specified using `.defer`
 syntax, or it can attempt to be inferred.
 
@@ -847,8 +847,62 @@ fn await_request4(io: &mut IO) -> async ? Request {
 
 This looks good. We do have an issue now though - this continuation is no longer something we can automatically create, even with `defer` syntax. The caller will have to manually create a callback, place it in some `'static` location, and pass a reference to it as an additional curried argument to the function. Our options for such a location are limited;
 either we have some appropriately sized static variable prepared, or we have to allocate memory. Allocating memory every time is not really what we wanted. However, this may enough of a foundation for a larger system that only requires
-a smaller set of delimited continuations at its core. We will leave the topic for now.
+a smaller set of delimited continuations at its core. 
 
-[Theory: There is a particularly important trait called `Value` that motivates the `!` and `?` syntax. A type that implements `Value` is exactly one that is all of `Copy`, `Drop`, and `'static`.
-Thus, `T + Value` corresponds to what in Linear Logic is written `!T`, sometimes called *of course*, an *exponential modality*. On the other hand, we have consciously chosen to assign a different meaning to `?` from linear logic - it corresponds to what [one paper](https://dl.acm.org/doi/pdf/10.1145/3473567) calls a *coexponential modality*, specifically the one that paper names *que*. The more classic meaning of `?`, along with the other coexponential modality, will show up later. The `/trait` syntax was created purely to conform better with Rust, and is not part of my original syntax]
+A polling system, also called readiness-based, on the other hand, could be modelled (somwhat oversimplifying) as `('1 ! Stream<()>, T)`. Such a type is often called `Future<T>`. Polling is semantically more complex than continuations - each time we try to poll, we have a possibility of not being ready or being complete,
+and can make a decision based on that. In practical readiness systems, there is still some mechanism for being able to wait and be woken up when the result is ready - this part usually still looks like registering some sort of
+callback. We are not forced to wait though. Having the decision point makes it more straightforward for an executor to interleave futures. The approach in Rust is to build up a number of large futures, and each of these needs allocation but then the executor does not need additional allocation to run them.
 
+We will leave the topic of async for now.
+
+There are other ways that `!`, `?`, and `/trait` can be used. A particularly important trait is `Value` - a type that implements `Value` is exactly one that is all of `Clone`, `Drop`, and `'static`.
+In other words, it is a nonlinear type that fully behaves like a value type, thus the name.
+
+If `T` is a struct, it's probably not clear what `T + Value` is supposed to mean. For now [WIP], our answer is that `T + trait`, if `T` does not already implement trait, is like a lazy trait object that implements trait but is also implicitly convertible to `T`.
+
+For `T + /Value`, the meaning is actually much clearer - a function returning this must consume `T` through a continuation that is also a `Value`. In other words, the continuation must be `Fn`, not just `FnOnce`.
+This lets us create interesting functions like:
+
+```
+fn iter(&[T]) -> &T + /Value;
+```
+
+The trick here is that because the continuation must be a `Value`, it can be called multiple times or dropped entirely.
+
+[Theory: `Value` is actually what motivates the `!` and `?` syntax. 
+`T + Value` corresponds to what in Linear Logic is written `!T`, sometimes called *of course*, an *exponential modality*. This is a nonlinear version of `T`. On the other hand, we have consciously chosen to assign a different meaning to `?` from linear logic - it corresponds to what [one paper](https://dl.acm.org/doi/pdf/10.1145/3473567) calls a *coexponential modality*, specifically the one that paper names *que*. The more classic meaning of `?`, along with the other coexponential modality, will show up later. The `/trait` syntax was created purely to conform better with Rust, and is not part of my original syntax]
+
+# Undelimited Continuations and Coroutines
+
+Rust represents the notion of a diverging function using the return type `!`. Actually, there are two ways that this type can be used. One is as the type of code whose control flow never returns to the caller. The other, which is not yet fully stabilized in Rust, is as the empty type. Rust is actually conflating these two cases together - a diverging function can be cast to any return type.
+However, the two situations are actually quite different. It is true that both share the property that control flow will never continue beyond the invocation. However, the reasons for that differ. In the former case, it is because the control flow has moved to somewhere else. In the latter case, it is because we are stating that this state is *impossible* - the entire branch we are on is *illegal* in the first place. From that perspective
+it makes sense that we can convert to any type and thus statically do anything, because it is all debunk and moot. `panic!` is usually thought of in this way, and for aborting panics, that is fine. `return` is the perfect example of the former; it leaves the current function.
+In the process, it also cleans up the current stack frame. Herein lies the problem. If we can statically do anything, then we can also statically make it look as if the stack frame, with all its local variables,
+will get cleaned up after the function return. Of course as we know, there is no actual function return and no cleanup - but if the state is illegal anyway, there doesn't have to be. For `return` though, this is contradictory -
+variables need to get cleaned up exactly once, and we cannot statically determine which variables need cleanup if we could trick the system into thinking a cleanup will happen that actually won't. This only works for Rust because it doesn't depend purely on a static determination here - it dynamically tracks
+which variables still need cleanup during the `return` or an unwinding `panic`, and all variables can be dropped. This doesn't work for NewLang though, because we have types that cannot automatically be dropped. Even if we did institute a dynamic system
+like Rust, for linear types we must statically prove that they are consumed exactly once.
+
+We thus have to distinguish between the empty type `enum {}`, or `Never`, and the return type of nonreturning functions. Since the syntax `!` is already taken, NewLang writes the latter as `(|)`, which can variously be referred as "bottom", "bot", or just the type of nonreturning computations. Only the former can be cast to any type and used in additional "fake" code. The latter must mark the end of a control flow branch in the current block, and only
+where the type is expected to be `(|)`. However, it is also a lazy type, so invocations that "return" it do not actually get executed until necessary. In that way, it is not an issue if we appear to assign the "result" of a nonreturning invocation to a variable that gets used later. For this reason, we say that while `(|)` has no values, it is not at all an "empty" type because it contains infinitely many computations.
+
+We have already alluded to the fact that `return` itself is considered to have a "return" type of `(|)`. In fact, when combined with the output type `T`, `return` can be understood as a function `FnOnce(T) -> (|)`.
+This is called an *undelimited continuation*. There are some complications relating to extracting the delimited continuation of an appropriate return type, but to keep it simple let us say
+that in any function returning `T`, `return.cont()` consumes your ability to use the `return` keyword and obtains a resource that implements `FnOnce(T) -> (|)`.
+
+This lets us trivially implement the vaunted `callcc`.
+
+```
+fn callcc<T>(f: impl FnOnce(dyn FnOnce(T) -> (|)) -> (|)) -> T {
+  f(return.cont())
+}
+```
+
+Before we get all excited and start trying to do crazy stuff with this, there are some things we should keep in mind. These undelimited continuations are *linear*. That means no, you cannot duplicate
+the continuation and cause the function to get returned from multiple times. That means no, you cannot drop the continuation and go do something else instead. That means no, you cannot save the continuation
+to some memory and then go call a different undelimited continuation. If you call `callcc` twice and end up with two undelimited continuations, we know the second one cannot escape its scope, and yet it must be consumed
+before leaving that scope, so you cannot call the first continuation first as that would count as leaving the scope without consuming the second continuation. On the other hand, this does mean we do not need any
+magic to implement these - an undelimited continuation is essentially just a return address.
+
+Some bits of type syntax. If `T` is not a lazy type, then `~T` is a synonym for the lazy type `FnOnce(T) -> (|)`. If `T` is a lazy type, then `~T` is some non-lazy type automatically associated with `T` that is
+equivalent to `dyn FnOnce(dyn T) -> (|)`. For example, for a trait `T` with multiple `self` methods, `~T` is actually an enum. For `FnOnce(A) -> B`, `~(FnOnce(A) -> B)` is the type `(~A, B)`.
