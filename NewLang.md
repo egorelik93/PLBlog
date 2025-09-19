@@ -905,4 +905,4 @@ before leaving that scope, so you cannot call the first continuation first as th
 magic to implement these - an undelimited continuation is essentially just a return address.
 
 Some bits of type syntax. If `T` is not a lazy type, then `~T` is a synonym for the lazy type `FnOnce(T) -> (|)`. If `T` is a lazy type, then `~T` is some non-lazy type automatically associated with `T` that is
-equivalent to `dyn FnOnce(dyn T) -> (|)`. For example, for a trait `T` with multiple `self` methods, `~T` is actually an enum. For `FnOnce(A) -> B`, `~(FnOnce(A) -> B)` is the type `(~A, B)`.
+equivalent to `dyn FnOnce(dyn T) -> (|)`. For example, for a trait `T` with multiple `self` methods, `~T` is actually an enum. For `FnOnce(A) -> B`, `~(FnOnce(A) -> B)` is the type `(A, ~B)`.
