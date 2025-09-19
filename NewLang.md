@@ -872,7 +872,7 @@ The trick here is that because the continuation must be a `Value`, it can be cal
 [Theory: `Value` is actually what motivates the `!` and `?` syntax. 
 `T + Value` corresponds to what in Linear Logic is written `!T`, sometimes called *of course*, an *exponential modality*. This is a nonlinear version of `T`. On the other hand, we have consciously chosen to assign a different meaning to `?` from linear logic - it corresponds to what [one paper](https://dl.acm.org/doi/pdf/10.1145/3473567) calls a *coexponential modality*, specifically the one that paper names *que*. The more classic meaning of `?`, along with the other coexponential modality, will show up later. The `/trait` syntax was created purely to conform better with Rust, and is not part of my original syntax]
 
-# Undelimited Continuations and Coroutines
+## Undelimited Continuations and Coroutines
 
 Rust represents the notion of a diverging function using the return type `!`. Actually, there are two ways that this type can be used. One is as the type of code whose control flow never returns to the caller. The other, which is not yet fully stabilized in Rust, is as the empty type. Rust is actually conflating these two cases together - a diverging function can be cast to any return type.
 However, the two situations are actually quite different. It is true that both share the property that control flow will never continue beyond the invocation. However, the reasons for that differ. In the former case, it is because the control flow has moved to somewhere else. In the latter case, it is because we are stating that this state is *impossible* - the entire branch we are on is *illegal* in the first place. From that perspective
