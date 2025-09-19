@@ -759,7 +759,7 @@ In practice, it is more convenient if `Duplicate` is defined instead as cloning 
 [ Tangential Note on Monads: We would like to support monads. However, since we are in a linear language, it makes sense to ask what a comprehensive linear monad would look like. As it turns out, it doesn't buy us much.
   For any linear functor `F` in fact, mapping over `FnOnce`, given `F<A>` we can trivially extract `A`, obtaining `('1 ! F<()>, Defer<A>)`. Weaker kinds of monads may be more diverse, but we won't address them at the moment.] 
 
-## Async and Modality
+## Async Pt. 1 and Modality
 
 Every language eventually runs into the question of how to cleanly support asynchronous IO operations. The current state of the art seems to be to transform functions into state machines,
 which are driven either by polling or through continuations. Much has been written about how this splits ecosystems into two - blocking and non-blocking variants. Ideally, there would be no need for that.
@@ -818,10 +818,37 @@ fn await_request3(io: &mut IO) -> Request + /'static + /Move {
 }
 ```
 
-This is better - now we require that the continuation is static and can be moved. This is a bit unwieldy to write out though. We have the option to define a trait encompassing both, but there is another
+This is better - now we require that the continuation is static and can be moved. Still, actually moving the continuation elsewhere requires heap allocation, and that's not great. We can somewhat reduce the problem
+if we insist on passing a pointer to the continuation instead.
+
+```
+fn await_request3(io: &mut IO) -> &in ? Request + /'static + /Move {
+  let cont = return.get_out();
+  ????(io, cont);
+  return;
+}
+```
+
+In this case, `&in` gets applied to the continuation. 
+This is a bit unwieldy to write out though. We have the option to define a trait encompassing `'static` and `Move`, but that doesn't help us with `&in ?`. There is another
 option - the `!` and `?` are actually intended to be extensible. We won't go into the details, but different values can be applied using `!` or `?` to apply different type transformations.
 We call these custom behaviors *modalities*.
 One of the consistencies however is the relationship of `?` and `!`.
 
+Let's say we have a modality `async`.
+
+```
+fn await_request4(io: &mut IO) -> async ? Request {
+  let cont = return.get_out();
+  ????(io, cont);
+  return;
+}
+```
+
+This looks good. We do have an issue now though - this continuation is no longer something we can automatically create, even with `defer` syntax. The caller will have to manually create a callback, place it in some `'static` location, and pass a reference to it as an additional curried argument to the function. Our options for such a location are limited;
+either we have some appropriately sized static variable prepared, or we have to allocate memory. Allocating memory every time is not really what we wanted. However, this may enough of a foundation for a larger system that only requires
+a smaller set of delimited continuations at its core. We will leave the topic for now.
+
 [Theory: There is a particularly important trait called `Value` that motivates the `!` and `?` syntax. A type that implements `Value` is exactly one that is all of `Copy`, `Drop`, and `'static`.
 Thus, `T + Value` corresponds to what in Linear Logic is written `!T`, sometimes called *of course*, an *exponential modality*. On the other hand, we have consciously chosen to assign a different meaning to `?` from linear logic - it corresponds to what [one paper](https://dl.acm.org/doi/pdf/10.1145/3473567) calls a *coexponential modality*, specifically the one that paper names *que*. The more classic meaning of `?`, along with the other coexponential modality, will show up later. The `/trait` syntax was created purely to conform better with Rust, and is not part of my original syntax]
+
