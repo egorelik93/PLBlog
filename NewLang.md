@@ -888,7 +888,7 @@ where the type is expected to be `(|)`. However, it is also a lazy type, so invo
 
 We have already alluded to the fact that `return` itself is considered to have a "return" type of `(|)`. In fact, when combined with the output type `T`, `return` can be understood as a function `FnOnce(T) -> (|)`.
 This is called an *undelimited continuation*. There are some complications relating to extracting the delimited continuation of an appropriate return type, but to keep it simple let us say
-that in any function returning `T`, `return.cont()` consumes your ability to use the `return` keyword and obtains a resource that implements `FnOnce(T) -> (|)`.
+that in any function returning `T`, `return.cont()` consumes your ability to use the `return` keyword and obtains a resource of a type called `~T` that can be turned into an `FnOnce(T) -> (|)`.
 
 This lets us trivially implement the vaunted `callcc`.
 
@@ -905,4 +905,8 @@ before leaving that scope, so you cannot call the first continuation first as th
 magic to implement these - an undelimited continuation is essentially just a return address.
 
 Some bits of type syntax. If `T` is not a lazy type, then `~T` is a synonym for the lazy type `FnOnce(T) -> (|)`. If `T` is a lazy type, then `~T` is some non-lazy type automatically associated with `T` that is
-equivalent to `dyn FnOnce(dyn T) -> (|)`. For example, for a trait `T` with multiple `self` methods, `~T` is actually an enum. For `FnOnce(A) -> B`, `~(FnOnce(A) -> B)` is the type `(A, ~B)`.
+equivalent to `dyn FnOnce(dyn T) -> (|)`. For example, for a trait `T` with multiple `self` methods, `~T` is actually an enum. For `FnOnce(A) -> B`, `~(FnOnce(A) -> B)` is the type `(A, ~B)`. `~(|)` is `()`.
+
+This is significant, because if you have a function that returns a lazy type, the undelimited continuation still exists (unlike with delimited continuations), but it is not the type `dyn FnOnce(dyn T) -> (|)` but instead
+`~T`. For appropriate `T`, `~T` may even be Copy, Drop, or static.
+`
