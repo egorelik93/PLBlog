@@ -37,6 +37,8 @@ it cannot be moveable. Thus, unlike Rust, we do need true immoveable types - in 
 
 Multiple lifetimes can be combined into a narrower lifetime using the `*` operator.
 
+
+
 ```
 struct Example2 {
   source1: Pinned<i32>,
@@ -888,7 +890,7 @@ where the type is expected to be `(|)`. However, it is also a lazy type, so invo
 
 We have already alluded to the fact that `return` itself is considered to have a "return" type of `(|)`. In fact, when combined with the output type `T`, `return` can be understood as a function `FnOnce(T) -> (|)`.
 This is called an *undelimited continuation*. There are some complications relating to extracting the delimited continuation of an appropriate return type, but to keep it simple let us say
-that in any function returning `T`, `return.cont()` consumes your ability to use the `return` keyword and obtains a resource of a type called `~T` that can be turned into an `FnOnce(T) -> (|)`.
+that in any function returning `T`, `return.cont()` consumes your ability to use the `return` keyword and obtains a resource of a type called `~T`, also called the *negation* of `T` or sometimes *not* `T`, which can be invoked on a `T` to obtain `(|)`.
 
 This lets us trivially implement the vaunted `callcc`.
 
@@ -904,9 +906,76 @@ to some memory and then go call a different undelimited continuation. If you cal
 before leaving that scope, so you cannot call the first continuation first as that would count as leaving the scope without consuming the second continuation. On the other hand, this does mean we do not need any
 magic to implement these - an undelimited continuation is essentially just a return address.
 
-Some bits of type syntax. If `T` is not a lazy type, then `~T` is a synonym for the lazy type `FnOnce(T) -> (|)`. If `T` is a lazy type, then `~T` is some non-lazy type automatically associated with `T` that is
-equivalent to `dyn FnOnce(dyn T) -> (|)`. For example, for a trait `T` with multiple `self` methods, `~T` is actually an enum. For `FnOnce(A) -> B`, `~(FnOnce(A) -> B)` is the type `(A, ~B)`. `~(|)` is `()`.
+Some bits of type syntax. If `T` is not a lazy type, then `~T` is a synonym for the lazy type `FnOnce(T) -> (|)`. If `T` is a lazy type, then `~T` wraps some non-lazy type automatically associated with `T` that is
+equivalent to `dyn FnOnce(dyn T) -> (|)`. For example, for a trait `T` with multiple `self` methods, `~T` wraps an enum. For `FnOnce(A) -> B`, `~(FnOnce(A) -> B)` wrap the type `(A, ~B)`. `~(|)` is `()`.
 
 This is significant, because if you have a function that returns a lazy type, the undelimited continuation still exists (unlike with delimited continuations), but it is not the type `dyn FnOnce(dyn T) -> (|)` but instead
 `~T`. For appropriate `T`, `~T` may even be Copy, Drop, or static.
-`
+
+We say "wrap" only because making `~T` synonymous with those types would make it difficult to have `~T` be directly invocable. To access the inside, for now [WIP] use `.into_inner()`.
+
+Returning `~T` from a function is equivalent to taking `T` as an argument and returning `(|)`. This is more obvious when `T` is a non-lazy type. When `T` is lazy, there are complicates regarding returning
+`~T` then being equivalent to `/~T -> ()`. Its negation should then really be similar to `(/~T, (|))`. While not obvious at the moment, it is our intent that the latter type is equivalent to `FnOnce(~T) -> (|)` for lazy `T`.
+
+If you have an `~T` as an argument, right now you can really only use it in a function that returns `(|)`. Otherwise, it would be as if you could return twice from a function. You would end up with 
+a pair `((|), (|))`, which *cannot* be consolidated; you are stuck if you end up with this.
+There do exist patterns where this is exactly what we want though.
+
+We can express the type of a function that "returns" multiple times as
+
+```
+fn multi_return() -> (| T0, T1 |);
+```
+
+These `(| |)` brackets work like tuples; any number of types can be placed in there. You cannot write `(||)` however; this concept is just `(|)` and should be written as such.
+Returning `(| T |)` is just the same thing as returning `T`. As a type, `(| T0, ..., TN |)` is a lazy type much like `(|)`, and all the `T1` ... `TN` are converted into lazy "return" types if not already.
+
+Traditionally, this type is called *par*, but our observation is that it really has more in common with *coroutines* rather than true parallel execution. *par* is nice and short though, so I will use both
+terminologies at times.
+
+When writing such a function or coroutine, `return` now behaves like a tuple. The first return can be accessed by `return.0`, the next by `return.1`, and so-on. You cannot just use them as alternates in place
+of an ordinary `return` though, as this would just give you `((|), (|))`. You still must end up with a single `(|)` on every code path, and that limits how a coroutine can be structured.
+
+Generally the simplest scenario is if one side feeds into the other.
+
+```
+fn t_or_not_t<T>() -> (| ~T, T |) {
+  return.0 return.1
+} 
+```
+
+If you have a function with one or more `~` arguments that returns something, then all of the former can be moved to the return type together with the existing return type by combining them with this par type.
+
+Beyond these, the only way to end up with a par type seems to be to have been given one. The use of a `par` value is extremely restricted. You must pattern match
+into `(| a0, a1, ..., an |)` and then the result *must* also be a coroutine. The key idea is that environments *split* when using par. Only in this situation, you can use `(| e0, ..., en |)` syntax to form
+a new coroutine, but each variable you matched must be used in *exactly* one branch of the new coroutine. There is no option to *forget* a variable either, with one exception - a `(|)` can be forgotten, if say
+the coroutine previously returned on that branch. In fact, this mechanism is the only way to get rid of a coroutine type - matching only a single value from a coroutine type allows you to use that value normally,
+and matching nothing is considered the same as having a single `(|)`.
+Other resources in the environment can also be used,
+but unless they are `Copy`, each one can also only be used in at most one branch.
+
+```
+fn coroutine_transform_example(c: (| i32, i32 |)) -> (| i32, i32 |) {
+  let (a, b) = c;
+  (| a + 1, b + 2 |)
+}
+
+fn id_coroutine_example(t: T) -> T {
+   let (| cont, value |) = t_or_not_t<T>();
+   let (| _, value) = (|
+   {
+     cont(t)
+   },
+   {
+     value
+   }
+   |);
+   value
+}
+
+fn multi_return_example() -> (| (i32, (|)), (i32, (|)), i32 |) {
+  return.0 (0, return.1 (1, return.2 2))
+}
+```
+
+Implementation-wise, a coroutine is just a non-returning function with multiple negated arguments.
