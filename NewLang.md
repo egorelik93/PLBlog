@@ -33,11 +33,9 @@ You can write this type, but not actually create any instances of it. An i32 tha
 While it is borrowed, a variable of type `Pinned<T>` cannot be used. When the borrow ends, however, it automatically goes back to just being of type `T`.
 
 Structs that contain pointers to themselves cannot be moved without breaking the pointer (or some kind of update mechanism), so for this to be possible, `Pinned<T>` and any struct containing
-it cannot be moveable. Thus, unlike Rust, we do need true immoveable types - in keeping with the Rust style, we'll say that `Move` is a trait like `Sized`, and that immoveable types impl `!Move`.
+it cannot be moveable. Thus, unlike Rust, we do need true immoveable types - in keeping with the Rust style, we'll say that `Move` is a trait.
 
 Multiple lifetimes can be combined into a narrower lifetime using the `*` operator.
-
-
 
 ```
 struct Example2 {
@@ -161,7 +159,7 @@ This is not to be confused with the lifetimes of the input values themselves.
 If all the input values themselves are known to outlive some lifetime,
 then NewLang can prove that the result outlives *that* lifetime.
 
-If `T : 'l`, then it also the case that `('l ! T) : 'static`. Whether the reverse is true is not yet clear. 
+If `T : 'l`, then it also the case that `('l ! T) : 'static`. Whether the reverse is true is not yet clear. However, for this reason, I am tentatively calling a type that has some lifetime it outlives *semistatic*. 
 
 ## Trait Objects and Closures
 
@@ -275,7 +273,7 @@ fn example7(a: &A) -> &B -> &A {
 
 Whether the closure object in this case implements `Fn`, `FnMut`, or just `FnOnce` can be determined from the environment it takes in.
 
-Here is what is actually happening. The transfer of lifetimes allows for an "unusual" implementation of `Move` for trait objects. Instead of literally moving a dynamically-sized
+Here is what is actually happening. The transfer of lifetimes allows for an "unusual" means of passing trait objects as arguments. Instead of literally moving a dynamically-sized
 value, we often can silently take a pointer to the original contents and implictly construct a new, small trait object that references it. Ownership is transferred
 without actually moving anything. This allows us to pass a trait object as an argument to a function like the following without dynamically-sized stack objects:
 
@@ -286,7 +284,13 @@ fn invoke_trait() -> A {
 }
 ```
 
-Being trait objects, this works for closures too.
+This operation is very similar to `Move` - we have a value in an old location, and want to grant owned access to it from a new location. We call it and its associated trait `Transfer`.
+Despite the odd implementation, this is essentially what `Move` does. However, as traditionally conceived `Move` has one more characteristic, and that is what prevents 
+such implementations - but as it turns out is irrelevant for just passing to a function. That characteristic is that the new location is not order-dependent on the old location.
+For semistatic types this is always the case, but not for trait objects. The trait `Move` is just the combination of `Transfer` and being semistatic. `Transfer` is like `Sized`, assumed
+by default unless otherwise specified. A generic that requires the full `Move` has to specify that explicity, however.
+
+Being trait objects, `Transfer` works for closures too.
 
 ```
 fn invoke(f: FnOnce(A) -> B, a : A) -> B {
@@ -311,7 +315,7 @@ fn invoke_a() {
 
 It is possible to *force* that a function immediately returns a trait object by using the *dyn* modifier in a return type. This modifier basically eliminates the laziness of trait objects.
 Do note that this limits the possible ways to implement such a function. For now, the only way to return a dyn trait object from a function is if it came from one of the arguments (in which case,
-we use the mentioned move implementation).
+we use the mentioned transfer implementation).
 
 ```
 fn extract_trait(m: MyContainer) -> dyn MyTrait {
@@ -813,18 +817,20 @@ That being said, if you remember the Lifetimes section, you might have realized 
 for this, but now we have need for something else. For any trait `T`, `X + /T` means that `T` is applied to the delimited continuation of `X`.
 
 ```
-fn await_request3(io: &mut IO) -> Request + /'static + /Move {
+fn await_request3(io: &mut IO) -> Request + /'static + /Transfer {
   let cont = return.get_out();
   ????(io, cont);
   return;
 }
 ```
 
-This is better - now we require that the continuation is static and can be moved. Still, actually moving the continuation elsewhere requires heap allocation, and that's not great. We can somewhat reduce the problem
+We can replace `/'static + /Transfer` with `/Move`.
+
+This is better - now we require that the continuation is static and can be transferred. Still, actually moving the continuation elsewhere requires heap allocation, and that's not great. We can somewhat reduce the problem
 if we insist on passing a pointer to the continuation instead.
 
 ```
-fn await_request3(io: &mut IO) -> &in ? Request + /'static + /Move {
+fn await_request3(io: &mut IO) -> &in ? Request + /Move {
   let cont = return.get_out();
   ????(io, cont);
   return;
@@ -832,7 +838,7 @@ fn await_request3(io: &mut IO) -> &in ? Request + /'static + /Move {
 ```
 
 In this case, `&in` gets applied to the continuation. 
-This is a bit unwieldy to write out though. We have the option to define a trait encompassing `'static` and `Move`, but that doesn't help us with `&in ?`. There is another
+This is still a bit unwieldy to write out though. There is another
 option - the `!` and `?` are actually intended to be extensible. We won't go into the details, but different values can be applied using `!` or `?` to apply different type transformations.
 We call these custom behaviors *modalities*.
 One of the consistencies however is the relationship of `?` and `!`.
