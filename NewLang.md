@@ -66,7 +66,7 @@ fn f(a1: &i32, a2: &i32) -> &i32 {
 This is very different from Rust, which understands that only `a1`'s lifetime mattered. Later we will come back to ways to get the Rust behavior.
 
 Note that `&i32` is not just `&'l i32` with some sort of inferred lifetime parameter either. Think of the lifetime not as part of the reference type but as an externally
-applied constraint, which functions must preserve. If you need to explicitly apply this constraint, such as in a struct definition, the preferred syntax is `'l ! i32` (the use of the `%` symbol specifically is tentative).
+applied constraint, which functions must preserve. If you need to explicitly apply this constraint, such as in a struct definition, the preferred syntax is `'l ! i32`.
 
 ```
 struct Example {
@@ -159,7 +159,20 @@ This is not to be confused with the lifetimes of the input values themselves.
 If all the input values themselves are known to outlive some lifetime,
 then NewLang can prove that the result outlives *that* lifetime.
 
-If `T : 'l`, then it also the case that `('l ! T) : 'static`. Whether the reverse is true is not yet clear. However, for this reason, I am tentatively calling a type that has some lifetime it outlives *semistatic*. 
+Our working definition of "outlives", possibly not directly expressible in NewLang, is
+
+```
+trait 'l {
+  fn outlives<'m, 'u>(s: 'm ! Self) -> 'u ! Self
+    where 'u : 'l, 'u : 'm
+}
+```
+
+`'u` here is intended to be the union of `'l` and `'m` as lifetimes. So the meaning here is that if `T: 'l`, then any part of a lifetime that is not also part of `l` can be ignored.
+
+If `T : 'l`, then it also the case that `('l ! T) : 'static`. The reverse does not directly follow
+from this definition, though in the underlying theory it is intended to be the case. 
+For this reason, I am tentatively calling a type that has some lifetime it outlives *semistatic*. 
 
 ## Trait Objects and Closures
 
