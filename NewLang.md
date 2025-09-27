@@ -163,7 +163,7 @@ Our working definition of "outlives", possibly not directly expressible in NewLa
 
 ```
 trait 'l {
-  fn outlives<'m, 'u>(s: 'm ! Self) -> ('m \/ 'l) ! Self;
+  fn outlives<'m>(s: 'm ! Self) -> ('m \/ 'l) ! Self;
 }
 ```
 
