@@ -163,15 +163,13 @@ Our working definition of "outlives", possibly not directly expressible in NewLa
 
 ```
 trait 'l {
-  fn outlives<'m, 'u>(s: 'm ! Self) -> 'u ! Self
-    where 'u : 'l, 'u : 'm
+  fn outlives<'m, 'u>(s: 'm ! Self) -> ('m \/ 'l) ! Self;
 }
 ```
 
-`'u` here is intended to be the union of `'l` and `'m` as lifetimes. So the meaning here is that if `T: 'l`, then any part of a lifetime that is not also part of `l` can be ignored.
+`('m \/ 'l)` here is intended to be the union of `'l` and `'m` as lifetimes, but is not [currently] actual syntax. So the meaning here is that if `T: 'l`, then any part of a lifetime that is not also part of `l` can be ignored.
 
-If `T : 'l`, then it also the case that `('l ! T) : 'static`. The reverse does not directly follow
-from this definition, though in the underlying theory it is intended to be the case. 
+If `T : 'l`, then it is also the case that `('l ! T) : 'static`.
 For this reason, I am tentatively calling a type that has some lifetime it outlives *semistatic*. 
 
 ## Trait Objects and Closures
